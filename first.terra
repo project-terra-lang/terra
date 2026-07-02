@@ -1,0 +1,26 @@
+global State state = State{};
+
+-- local variables
+local Int x = 10;
+
+function x() : (Int, String) {
+    return 69420, "nice";
+}
+
+function x(Int x) : (Int, String) {
+    return x, "nice";
+}
+
+if x < 69420 {
+    print("Hallo");
+} elseif x < 100 {
+    print('c');
+} else {
+    print(100);
+}
+
+unless x < 69420 {
+    print("Hallo");
+} else {
+    print(100);
+}
