@@ -4,4 +4,4 @@
 
 start() -> 
     File = file:read_file("first.terra"),
-    io:fwrite("~p~n",[File]).
+    io:format("~p~n",[File]).
