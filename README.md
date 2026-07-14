@@ -4,7 +4,7 @@
 - [ ] (Turing Complete)
 - [ ] (Small Standard Library)
 
-> ADD MORE FEATURES OVER TIME AS THIS IS A RESEARCH PROJECT
+> ADD MORE FEATURES OVER TIME AS THIS IS A RESEARCH PROJECT <br>
 > This Language will be a transpiler (basically converting our source code to beam source files to be run in erlang runtime)
 
 1. Variables
