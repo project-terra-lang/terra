@@ -5,7 +5,8 @@
 - [ ] (Small Standard Library)
 
 > ADD MORE FEATURES OVER TIME AS THIS IS A RESEARCH PROJECT <br>
-> This Language will be a transpiler (basically converting our source code to beam source files to be run in erlang runtime)
+> This Language will be a transpiler (basically converting our source code to beam source files to be run in erlang runtime) <br>
+> Design the language in a way in which it will work nicely with the erlang ecosystem and that it has a nice imperative syntax for people to code there game servers
 
 1. Variables
 - All Variables are Immutable
@@ -32,6 +33,7 @@ function x(Int x) : (Int, String) {
 
 3. Condition Handling
 ```elixir
+# if..elseif..else
 if x < 69420 {
     print("Hallo");
 } elseif x < 100 {
@@ -40,9 +42,42 @@ if x < 69420 {
     print(100);
 }
 
+# unless..else
 unless x < 69420 {
     print("Hallo");
 } else {
     print(100);
 }
+
+# switch statement
+# - break by default
+# - pattern matching
+# - exhaustive
+if x == {
+    case 69420:
+        print();
+
+    case:
+        whatever();
+}
 ```
+
+4. Loops
+```lua
+for_each x in y {
+    -- implicit variable called it is stored in every iterable sequence
+    print(x.it.whatever);
+}
+
+for range(10) {
+    print(it);
+}
+
+while true {
+    print(it);
+}
+
+do_while true {
+    print(it)
+}
+``` 
