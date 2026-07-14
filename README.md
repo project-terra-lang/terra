@@ -1,10 +1,11 @@
 # A Simple Programming Language Project
-- [ ](Concurrent Programming Langauge)
-- [ ](Immutable State Machine)
-- [ ](Turing Complete)
-- [ ](Small Standard Library)
+- [ ] (Concurrent Programming Langauge)
+- [ ] (Immutable State Machine, Support for Fake Mutability via a new mechanism)
+- [ ] (Turing Complete)
+- [ ] (Small Standard Library)
 
 > ADD MORE FEATURES OVER TIME AS THIS IS A RESEARCH PROJECT
+> This Language will be a transpiler (basically converting our source code to beam source files to be run in erlang runtime)
 
 1. Variables
 - All Variables are Immutable
