@@ -8,14 +8,40 @@
 > This Language will be a transpiler (basically converting our source code to beam source files to be run in erlang runtime) <br>
 > Design the language in a way in which it will work nicely with the erlang ecosystem and that it has a nice imperative syntax for people to code there game servers
 
+0. Data Types
+```elixir
+Number (Super Data Type)
+    - Int
+    - SInt 
+    - Float
+
+Atom
+
+Bool
+
+Tuple
+
+Map
+RestrictedMap -- this is the same as a map but we can set the length of it
+
+List
+
+String (Super Data Type)
+    BinaryString
+    CharList
+```
+
 1. Variables
 - All Variables are Immutable
 ```lua
 -- global variables
-global State state = State{};
+global State state = State();
 
 -- local variables
 local Int x = 10;
+
+-- temporary variables
+temp Var zss = Var();
 ```
 
 2. Functions
