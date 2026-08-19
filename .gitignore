@@ -5,6 +5,8 @@
 *.o
 *.plt
 erl_crash.dump
+*.crashdump
+*.lock
 
 # =========================================================================
 # Build Tools and Dependencies

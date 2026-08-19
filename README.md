@@ -4,6 +4,9 @@
 - [ ] (Turing Complete)
 - [ ] (Small Standard Library)
 
+** Just Make this a simple Language no need any complete features 
+** Its just a research project anyways
+
 > ADD MORE FEATURES OVER TIME AS THIS IS A RESEARCH PROJECT <br>
 > This Language will be a transpiler (basically converting our source code to beam source files to be run in erlang runtime) <br>
 > Design the language in a way in which it will work nicely with the erlang ecosystem and that it has a nice imperative syntax for people to code there game servers
@@ -19,16 +22,11 @@ Atom
 
 Bool
 
+Map
+List
 Tuple
 
-Map
-RestrictedMap -- this is the same as a map but we can set the length of it
-
-List
-
-String (Super Data Type)
-    BinaryString
-    CharList
+String
 ```
 
 1. Variables
