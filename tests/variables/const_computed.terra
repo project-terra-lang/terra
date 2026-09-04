@@ -1,0 +1,3 @@
+local const Int base = 2;
+local const Int total = base + 3;
+local computed Int next = total + 1;

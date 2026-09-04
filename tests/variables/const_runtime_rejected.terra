@@ -1,0 +1,2 @@
+local Int base = 2;
+local const Int total = base + 3;

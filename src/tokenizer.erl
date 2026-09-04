@@ -5,11 +5,36 @@
 keyword(<<"if">>)     -> {ok, 'if'};
 keyword(<<"else">>)   -> {ok, 'else'};
 keyword(<<"while">>)  -> {ok, while};
+keyword(<<"function">>) -> {ok, function};
 keyword(<<"fn">>)     -> {ok, fn};
 keyword(<<"return">>) -> {ok, return};
 keyword(<<"let">>)    -> {ok, 'let'};
+keyword(<<"global">>) -> {ok, global};
+keyword(<<"local">>)  -> {ok, local};
+keyword(<<"temp">>)   -> {ok, temp};
+keyword(<<"lazy">>)   -> {ok, lazy};
+keyword(<<"const">>)  -> {ok, const};
+keyword(<<"computed">>) -> {ok, computed};
+keyword(<<"atomic">>) -> {ok, atomic};
+keyword(<<"thread_local">>) -> {ok, thread_local};
+keyword(<<"Number">>) -> {ok, number};
+keyword(<<"Int">>)    -> {ok, int};
+keyword(<<"SInt">>)   -> {ok, sint};
+keyword(<<"Float">>)  -> {ok, float};
+keyword(<<"Atom">>)   -> {ok, atom};
+keyword(<<"Bool">>)   -> {ok, bool};
+keyword(<<"Map">>)    -> {ok, map};
+keyword(<<"List">>)   -> {ok, list};
+keyword(<<"Tuple">>)  -> {ok, tuple};
+keyword(<<"String">>) -> {ok, string};
+keyword(<<"State">>)  -> {ok, state};
+keyword(<<"Var">>)    -> {ok, var};
+keyword(<<"True">>)   -> {ok, true};
+keyword(<<"False">>)  -> {ok, false};
 keyword(<<"true">>)   -> {ok, true};
 keyword(<<"false">>)  -> {ok, false};
+keyword(<<"null">>)   -> {ok, null};
+keyword(<<"nil">>)    -> {ok, nil};
 keyword(<<"_">>)      -> {ok, '_'};
 keyword(_)            -> false.
 
@@ -45,6 +70,7 @@ tokenize(<<C, Rest/binary>>, Acc) when C == $\s; C == $\t; C == $\n; C == $\r ->
 
 %% Match multi-character operators (must stay above the single-character block)
 tokenize(<<"//", Rest/binary>>, Acc) -> tokenize(skip_line(Rest), Acc);
+tokenize(<<"--", Rest/binary>>, Acc) -> tokenize(skip_line(Rest), Acc);
 tokenize(<<"==", Rest/binary>>, Acc) -> tokenize(Rest, [{eq_eq, "=="} | Acc]);
 tokenize(<<"!=", Rest/binary>>, Acc) -> tokenize(Rest, [{not_eq, "!="} | Acc]);
 tokenize(<<"<=", Rest/binary>>, Acc) -> tokenize(Rest, [{lt_eq, "<="} | Acc]);

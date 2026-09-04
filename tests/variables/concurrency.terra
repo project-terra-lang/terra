@@ -1,0 +1,3 @@
+global atomic Int counter = 0;
+local thread_local String session = "abc";
+local Int snapshot = counter;

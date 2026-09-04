@@ -3,6 +3,7 @@
 - [ ] (Immutable State Machine, Support for Fake Mutability via a new mechanism)
 - [ ] (Turing Complete)
 - [ ] (Small Standard Library)
+- [ ] (An Imperative Programming Language that has features of erlang)
 
 ** Just Make this a simple Language no need any complete features 
 ** Its just a research project anyways

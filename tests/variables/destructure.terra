@@ -1,0 +1,2 @@
+local Tuple pair = (1, "one");
+local (Int id, String label) = pair;

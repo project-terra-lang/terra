@@ -1,0 +1,2 @@
+local lazy Int expensive = 10;
+local Int copy = expensive;
