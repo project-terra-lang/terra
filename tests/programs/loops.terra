@@ -1,0 +1,33 @@
+function Number Recur(Int n) {
+  if n <= 0 {
+    return 0;
+  }
+  Recur(n - 1);
+  return n;
+}
+
+function Number LoopDemo(List items) {
+  for_each x in items {
+    stdout(x.it.whatever);
+  }
+
+  for range(10) {
+    stdout(it);
+  }
+
+  while true {
+    stdout(it);
+  }
+
+  do_while true {
+    stdout(it)
+  }
+
+  Recur(3);
+  return 0;
+}
+
+function Number Main(String Args) {
+  LoopDemo(List());
+  return 0;
+}

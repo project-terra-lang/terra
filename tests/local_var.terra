@@ -1,3 +1,4 @@
+function Number Main(String Args) {
 local Number x = 10;
 local Atom match = :z;
 local Bool is_x = True;
@@ -6,3 +7,4 @@ local List xww = [2,2,2,2];
 local Tuple xzz = (1, "sdsd");
 local String string = "";
 local Float z = 10.0;
+}

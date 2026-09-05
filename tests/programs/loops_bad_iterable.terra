@@ -1,0 +1,6 @@
+function Number Main(String Args) {
+  for_each x in 10 {
+    stdout(x);
+  }
+  return 0;
+}

@@ -3,8 +3,17 @@
 
 %% Keyword table
 keyword(<<"if">>)     -> {ok, 'if'};
+keyword(<<"elseif">>) -> {ok, elseif};
 keyword(<<"else">>)   -> {ok, 'else'};
+keyword(<<"unless">>) -> {ok, unless};
+keyword(<<"case">>)   -> {ok, 'case'};
+keyword(<<"for_each">>) -> {ok, for_each};
+keyword(<<"for">>)    -> {ok, 'for'};
+keyword(<<"in">>)     -> {ok, 'in'};
+keyword(<<"range">>)  -> {ok, range};
 keyword(<<"while">>)  -> {ok, while};
+keyword(<<"do_while">>) -> {ok, do_while};
+keyword(<<"stdout">>) -> {ok, stdout};
 keyword(<<"function">>) -> {ok, function};
 keyword(<<"fn">>)     -> {ok, fn};
 keyword(<<"return">>) -> {ok, return};
@@ -96,6 +105,7 @@ tokenize(<<$<, Rest/binary>>, Acc) -> tokenize(Rest, [{lt, "<"} | Acc]);
 tokenize(<<$>, Rest/binary>>, Acc) -> tokenize(Rest, [{gt, ">"} | Acc]);
 tokenize(<<$!, Rest/binary>>, Acc) -> tokenize(Rest, [{bang, "!"} | Acc]);
 tokenize(<<$,, Rest/binary>>, Acc) -> tokenize(Rest, [{comma, ","} | Acc]);
+tokenize(<<$., Rest/binary>>, Acc) -> tokenize(Rest, [{dot, "."} | Acc]);
 tokenize(<<${, Rest/binary>>, Acc) -> tokenize(Rest, [{lbrace, "{"} | Acc]);
 tokenize(<<$}, Rest/binary>>, Acc) -> tokenize(Rest, [{rbrace, "}"} | Acc]);
 tokenize(<<$[, Rest/binary>>, Acc) -> tokenize(Rest, [{lbracket, "["} | Acc]);
@@ -120,6 +130,10 @@ tokenize(<<C, Rest/binary>>, Acc) when (C >= $a andalso C =< $z) orelse
 tokenize(<<$", Rest/binary>>, Acc) ->
     {Str, Remaining} = read_string(Rest, <<>>),
     tokenize(Remaining, [{string, Str} | Acc]);
+
+%% Character literals use Erlang's integer character representation.
+tokenize(<<$', C, $', Rest/binary>>, Acc) ->
+    tokenize(Rest, [{char, C} | Acc]);
 
 %% Handle syntax errors
 tokenize(<<Invalid, _/binary>>, _) ->

@@ -1,0 +1,35 @@
+function Number Whatever() {
+  return 0;
+}
+
+function Number Control() {
+  local Number x = 10;
+
+  if x < 69420 {
+    stdout("Hallo");
+  } elseif x < 100 {
+    stdout('c');
+  } else {
+    stdout(100);
+  }
+
+  unless x < 69420 {
+    stdout("Hallo");
+  } else {
+    stdout(100);
+  }
+
+  if x == {
+    case 69420:
+      stdout();
+    case:
+      Whatever();
+  }
+
+  return x;
+}
+
+function Number Main(String Args) {
+  Control();
+  return 0;
+}

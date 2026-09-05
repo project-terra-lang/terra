@@ -1,2 +1,4 @@
+function Number Main(String Args) {
 local Tuple pair = (1, "one");
 local (Int id, String label) = pair;
+}

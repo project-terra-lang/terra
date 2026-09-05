@@ -1,5 +1,7 @@
+function Number Main(String Args) {
 local Number count = 10;
 local Number ratio = 2.5;
 local List nums = [1,2,3];
 local Tuple pair = (1, "one");
 local Map lookup = #(:id => count, :ratio => ratio);
+}

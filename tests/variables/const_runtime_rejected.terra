@@ -1,2 +1,4 @@
+function Number Main(String Args) {
 local Int base = 2;
 local const Int total = base + 3;
+}

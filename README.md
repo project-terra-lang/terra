@@ -46,32 +46,54 @@ temp Var zss = Var();
 2. Functions
 - Functions support multiple Return Values
 - Functions support tail-call optimization
+- `name();` invokes a function normally and can run it multiple times.
+- `name;` marks a once-only invocation for the runtime/code-generation stage.
+- Terra programs run through one fixed entry point:
 ```lua
-function x() : (Int, String) {
+function Number Main(String Args) {
+}
+```
+
+```lua
+function (Int, String)  x(){
     return 69420, "nice";
 }
 
-function x(Int x) : (Int, String) {
+function (Int, String) x(Int x) {
     return x, "nice";
 }
 ```
 
+Multiple returned values can be assigned to typed local variables:
+```lua
+function (String, Number) T() {
+    return "", 69420;
+}
+
+function Number Main(String Args) {
+    local String x, Number y = T();
+    return y;
+}
+```
+
 3. Condition Handling
+- Conditions must evaluate to `Bool`.
+- Switch cases break by default and must include a final default `case:`.
 ```elixir
 # if..elseif..else
 if x < 69420 {
-    print("Hallo");
+    stdout("Hallo");
 } elseif x < 100 {
-    print('c');
+    stdout('c');
 } else {
-    print(100);
+    stdout(100);
 }
 
 # unless..else
 unless x < 69420 {
-    print("Hallo");
+    stdout("Hallo");
 } else {
-    print(100);
+    stdout(100);
 }
 
 # switch statement
@@ -80,7 +102,7 @@ unless x < 69420 {
 # - exhaustive
 if x == {
     case 69420:
-        print();
+        stdout();
 
     case:
         whatever();
@@ -88,21 +110,27 @@ if x == {
 ```
 
 4. Loops
+- `for_each` accepts `List`, `Tuple`, `Map`, and `String` values.
+- Loop bodies receive an implicit `it` variable.
+- Recursive calls use the normal function-call syntax and are type checked.
 ```lua
 for_each x in y {
     -- implicit variable called it is stored in every iterable sequence
-    print(x.it.whatever);
+    stdout(x.it.whatever);
 }
 
 for range(10) {
-    print(it);
+    stdout(it);
 }
 
 while true {
-    print(it);
+    stdout(it);
 }
 
 do_while true {
-    print(it)
+    stdout(it)
 }
 ``` 
+
+`stdout(...)` is the built-in console output operation. `print(...)` is left
+available for a future standard-library function.

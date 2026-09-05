@@ -45,7 +45,7 @@ print_help() ->
     io:format("  terra <file.terra>          Check a Terra file~n"),
     io:format("  terra check <file.terra>    Check a Terra file~n"),
     io:format("  terra tokens <file.terra>   Print tokenizer output~n"),
-    io:format("  terra ast <file.terra>      Print parsed variable AST~n"),
+    io:format("  terra ast <file.terra>      Print parsed program AST~n"),
     io:format("  terra types                 Print README data types~n"),
     io:format("  terra version               Print version~n"),
     io:format("  terra help                  Print this help~n").
@@ -93,7 +93,7 @@ print_tokens(Path) ->
     end.
 
 print_ast(Path) ->
-    case variables:parse_file(Path) of
+    case program:parse_file(Path) of
         {ok, Ast} ->
             io:format("~p~n", [Ast]),
             ok;
@@ -103,7 +103,7 @@ print_ast(Path) ->
     end.
 
 check_file(Path) ->
-    case variables:parse_file(Path) of
+    case program:parse_file(Path) of
         {ok, _Ast} ->
             io:format("terra: ~s ok~n", [Path]),
             ok;

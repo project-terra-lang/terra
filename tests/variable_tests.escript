@@ -35,7 +35,7 @@ cases() ->
       fun(Result) -> Result =:= {error, {invalid_atomic_type, string}} end}].
 
 run_case({Name, Path, Expect}) ->
-    Result = variables:parse_file(Path),
+    Result = parse_main_variables(Path),
     case Expect(Result) of
         true ->
             io:format("ok - ~s~n", [Name]),
@@ -43,6 +43,14 @@ run_case({Name, Path, Expect}) ->
         false ->
             io:format("not ok - ~s~n  got: ~p~n", [Name, Result]),
             fail
+    end.
+
+parse_main_variables(Path) ->
+    case program:parse_file(Path) of
+        {ok, Program} ->
+            variables:parse(program:entry_body(Program));
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 expect_basic({ok, Vars}) ->

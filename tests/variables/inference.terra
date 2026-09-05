@@ -1,3 +1,5 @@
+function Number Main(String Args) {
 local Var x = 10;
 local Int y = x;
 local Var label = "terra";
+}

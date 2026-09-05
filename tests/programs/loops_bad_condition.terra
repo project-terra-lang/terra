@@ -1,0 +1,6 @@
+function Number Main(String Args) {
+  while 10 {
+    stdout(it);
+  }
+  return 0;
+}

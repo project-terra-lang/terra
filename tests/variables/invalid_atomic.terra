@@ -1,1 +1,3 @@
+function Number Main(String Args) {
 local atomic String bad = "nope";
+}
