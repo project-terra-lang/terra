@@ -1,0 +1,138 @@
+-- Terra feature showcase
+-- Run with: ./run.sh run examples/feature_showcase.terra hello from terra
+
+function Int Factorial(Int n) {
+  if n <= 1 {
+    return 1;
+  }
+  return n * Factorial(n - 1);
+}
+
+function Int SumTo(Int n, Int total) {
+  if n <= 0 {
+    return total;
+  }
+  return SumTo(n - 1, total + n);
+}
+
+function (String, Number) Analyze(Int value) {
+  if value > 10 {
+    return "large", value * 2;
+  } elseif value > 5 {
+    return "medium", value * 2;
+  } else {
+    return "small", value * 2;
+  }
+}
+
+function Number Banner() {
+  stdout("=== Terra on the BEAM VM ===");
+  return 1;
+}
+
+function Number Main(String Args) {
+  -- Fixed entry point and command-line arguments.
+  stdout("Main received:");
+  stdout(Args);
+
+  -- Once-only calls run once even when written twice.
+  Banner;
+  Banner;
+
+  -- Normal calls run every time.
+  Banner();
+  Banner();
+
+  -- Variable scopes, evaluation modes, and concurrency markers.
+  global State state = State();
+  local const Int base = 4;
+  local computed Int total = base + 3;
+  local lazy Number delayed = Factorial(4);
+  local atomic Int counter = 1;
+  local thread_local String session = "local-session";
+  local Var inferred = 99;
+  temp Float ratio = 10.5;
+  local SInt debt = -5;
+  local Atom status = :ready;
+  local Bool enabled = true;
+
+  stdout("Variable values:");
+  stdout(state);
+  stdout(total);
+  stdout(delayed);
+  stdout(counter);
+  stdout(session);
+  stdout(inferred);
+  stdout(ratio);
+  stdout(debt);
+  stdout(status);
+
+  -- Lists, tuples, maps, member access, and destructuring.
+  local List names = ["Ada", "Grace", "Joe"];
+  local Tuple identity = (42, "pilot");
+  local Map profile = #(:name => "Terra", :version => 1);
+  local (Int id, String role) = identity;
+
+  stdout(profile.name);
+  stdout(id);
+  stdout(role);
+
+  -- Multiple function return values assigned to typed variables.
+  local String category, Number doubled = Analyze(total);
+  stdout(category);
+  stdout(doubled);
+
+  -- if / elseif / else.
+  if total > 10 {
+    stdout("total is large");
+  } elseif total == 7 {
+    stdout("total is exactly seven");
+  } else {
+    stdout("total is small");
+  }
+
+  -- unless / else.
+  unless enabled {
+    stdout("disabled");
+  } else {
+    stdout("enabled");
+  }
+
+  -- Exhaustive switch with break-by-default cases.
+  if category == {
+    case "large":
+      stdout("switch selected large");
+    case "medium":
+      stdout("switch selected medium");
+    case:
+      stdout("switch selected the default");
+  }
+
+  -- Iterate over a collection with a named item and implicit it index.
+  for_each name in names {
+    stdout(it);
+    stdout(name);
+  }
+
+  -- Range, while, and do_while loops all expose it.
+  for range(3) {
+    stdout(it);
+  }
+
+  while it < 2 {
+    stdout(it);
+  }
+
+  do_while it < 1 {
+    stdout(it)
+  }
+
+  -- Recursive function calls execute as ordinary BEAM calls.
+  stdout(Factorial(5));
+  stdout(SumTo(5, 0));
+
+  -- Character literals use Erlang-compatible integer characters.
+  stdout('T');
+
+  return doubled;
+}

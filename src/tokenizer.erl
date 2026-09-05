@@ -176,7 +176,11 @@ tokenize_file(Path) ->
             {error, bad_extension};
         match ->
             case file:read_file(Path) of
-                {ok, Binary}    -> {ok, tokenize(Binary)};
+                {ok, Binary} ->
+                    try {ok, tokenize(Binary)}
+                    catch
+                        error:Reason -> {error, {tokenize, Reason}}
+                    end;
                 {error, Reason} -> {error, {read_failed, Reason}}
             end
     end.

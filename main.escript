@@ -30,6 +30,16 @@ run(["tokens", Path]) ->
     print_tokens(Path);
 run(["ast", Path]) ->
     print_ast(Path);
+run(["explain", Path]) ->
+    explain_file(Path);
+run(["emit", Path]) ->
+    emit_file(Path, default_erlang_path(Path));
+run(["emit", Path, OutputPath]) ->
+    emit_file(Path, OutputPath);
+run(["build", Path]) ->
+    build_file(Path);
+run(["run", Path | ProgramArgs]) ->
+    run_file(Path, ProgramArgs);
 run(["check", Path]) ->
     check_file(Path);
 run([Path]) ->
@@ -46,6 +56,10 @@ print_help() ->
     io:format("  terra check <file.terra>    Check a Terra file~n"),
     io:format("  terra tokens <file.terra>   Print tokenizer output~n"),
     io:format("  terra ast <file.terra>      Print parsed program AST~n"),
+    io:format("  terra explain <file.terra>  Explain how a program behaves~n"),
+    io:format("  terra emit <file.terra>     Generate Erlang source~n"),
+    io:format("  terra build <file.terra>    Compile Erlang source to BEAM~n"),
+    io:format("  terra run <file.terra> ...  Build and run Main on the BEAM VM~n"),
     io:format("  terra types                 Print README data types~n"),
     io:format("  terra version               Print version~n"),
     io:format("  terra help                  Print this help~n").
@@ -102,6 +116,58 @@ print_ast(Path) ->
             halt(1)
     end.
 
+explain_file(Path) ->
+    case program:parse_file(Path) of
+        {ok, Program} ->
+            io:put_chars(explainer:format(Program)),
+            ok;
+        {error, Reason} ->
+            print_error(Path, Reason),
+            halt(1)
+    end.
+
+emit_file(Path, OutputPath) ->
+    case transpiler:emit_file(Path, OutputPath) of
+        {ok, _Module, WrittenPath} ->
+            io:format("terra: wrote Erlang source to ~s~n", [WrittenPath]),
+            ok;
+        {error, Reason} ->
+            print_error(Path, Reason),
+            halt(1)
+    end.
+
+build_file(Path) ->
+    case transpiler:compile_file(Path, build_dir()) of
+        {ok, _Module, BeamPath, ErlangPath} ->
+            io:format("terra: wrote Erlang source to ~s~n", [ErlangPath]),
+            io:format("terra: compiled BEAM module to ~s~n", [BeamPath]),
+            ok;
+        {error, Reason} ->
+            print_error(Path, Reason),
+            halt(1)
+    end.
+
+run_file(Path, ProgramArgs) ->
+    Args = string:join(ProgramArgs, " "),
+    case transpiler:run_file(Path, Args, build_dir()) of
+        {ok, _Module, Result, _BeamPath, _ErlangPath} ->
+            io:format("terra: program returned ~p~n", [Result]),
+            ok;
+        {error, Reason} ->
+            print_error(Path, Reason),
+            halt(1)
+    end.
+
+default_erlang_path(Path) ->
+    Module = atom_to_list(transpiler:module_name(Path)),
+    filename:join(build_dir(), Module ++ ".erl").
+
+build_dir() ->
+    case os:getenv("TERRA_BUILD_DIR") of
+        false -> "terra_build";
+        Directory -> Directory
+    end.
+
 check_file(Path) ->
     case program:parse_file(Path) of
         {ok, _Ast} ->
@@ -117,4 +183,4 @@ print_error(Path, bad_extension) ->
 print_error(Path, {read_failed, Reason}) ->
     io:format("terra: ~s: could not read file: ~p~n", [Path, Reason]);
 print_error(Path, Reason) ->
-    io:format("terra: ~s: ~p~n", [Path, Reason]).
+    io:put_chars(diagnostics:render(Path, Reason)).

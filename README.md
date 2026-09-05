@@ -111,7 +111,7 @@ if x == {
 
 4. Loops
 - `for_each` accepts `List`, `Tuple`, `Map`, and `String` values.
-- Loop bodies receive an implicit `it` variable.
+- Loop conditions and bodies receive an implicit `it` counter variable.
 - Recursive calls use the normal function-call syntax and are type checked.
 ```lua
 for_each x in y {
@@ -134,3 +134,28 @@ do_while true {
 
 `stdout(...)` is the built-in console output operation. `print(...)` is left
 available for a future standard-library function.
+
+5. Developer Feedback
+- `terra check file.terra` reports a stable error code, a plain-language
+  explanation, and a suggested fix.
+- `terra explain file.terra` prints a readable walkthrough of functions,
+  control flow, loops, calls, recursion, and returns.
+- `terra ast file.terra` remains available for inspecting the compiler AST.
+
+6. Erlang and BEAM Backend
+- `terra emit file.terra` writes generated Erlang source to `terra_build/`.
+- `terra build file.terra` generates Erlang and compiles a `.beam` module.
+- `terra run file.terra [args...]` builds the module and runs Terra `Main` on
+  the BEAM VM.
+- `TERRA_BUILD_DIR` can override the default `terra_build/` output directory.
+- Terra multiple returns compile to Erlang tuples, immutable locals compile to
+  Erlang single-assignment variables, and recursive calls remain ordinary BEAM
+  function calls.
+
+Try the complete feature showcase:
+```bash
+./build.sh --build
+./run.sh explain examples/feature_showcase.terra
+./run.sh emit examples/feature_showcase.terra
+./run.sh run examples/feature_showcase.terra hello from terra
+```

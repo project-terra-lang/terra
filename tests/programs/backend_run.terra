@@ -1,0 +1,46 @@
+function (String, Number) Pair() {
+  return "beam", 7;
+}
+
+function Number Countdown(Int n) {
+  if n <= 0 {
+    return 0;
+  }
+  return Countdown(n - 1);
+}
+
+function Number Touch() {
+  stdout("once");
+  return 1;
+}
+
+function Number Main(String Args) {
+  local String label, Number value = Pair();
+
+  if value == 7 {
+    stdout(label);
+  } else {
+    stdout("wrong");
+  }
+
+  for_each item in List(1, 2) {
+    stdout(item);
+  }
+
+  for range(3) {
+    stdout(it);
+  }
+
+  while it < 2 {
+    stdout(it);
+  }
+
+  do_while it < 1 {
+    stdout(it);
+  }
+
+  Touch;
+  Touch;
+  Countdown(3);
+  return value;
+}

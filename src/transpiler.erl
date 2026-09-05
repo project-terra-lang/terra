@@ -1,0 +1,396 @@
+-module(transpiler).
+-export([transpile_file/1, emit_file/2, compile_file/2, run_file/3, module_name/1]).
+
+transpile_file(Path) ->
+    case program:parse_file(Path) of
+        {ok, Program} ->
+            Module = module_name(Path),
+            try {ok, Module, generate_module(Module, Program)}
+            catch
+                throw:{backend_error, Reason} -> {error, {backend, Reason}}
+            end;
+        Error -> Error
+    end.
+
+emit_file(Path, OutputPath) ->
+    case transpile_file(Path) of
+        {ok, Module, Source} ->
+            ok = filelib:ensure_dir(OutputPath),
+            case file:write_file(OutputPath, iolist_to_binary(Source)) of
+                ok -> {ok, Module, OutputPath};
+                {error, Reason} -> {error, {write_failed, Reason}}
+            end;
+        Error -> Error
+    end.
+
+compile_file(Path, OutDir) ->
+    ModuleName = atom_to_list(module_name(Path)),
+    ErlangPath = filename:join(OutDir, ModuleName ++ ".erl"),
+    BeamPath = filename:join(OutDir, ModuleName ++ ".beam"),
+    case emit_file(Path, ErlangPath) of
+        {ok, Module, _} ->
+            ok = filelib:ensure_dir(filename:join(OutDir, "placeholder")),
+            case compile:file(ErlangPath, [debug_info, return_errors, return_warnings,
+                                           {outdir, OutDir}]) of
+                {ok, Module} -> {ok, Module, BeamPath, ErlangPath};
+                {ok, Module, _Warnings} -> {ok, Module, BeamPath, ErlangPath};
+                {error, Errors, Warnings} ->
+                    {error, {erlang_compile, Errors, Warnings}}
+            end;
+        Error -> Error
+    end.
+
+run_file(Path, Args, OutDir) ->
+    case compile_file(Path, OutDir) of
+        {ok, Module, BeamPath, ErlangPath} ->
+            code:purge(Module),
+            code:delete(Module),
+            BeamRoot = filename:rootname(BeamPath),
+            case code:load_abs(BeamRoot) of
+                {module, Module} ->
+                    try
+                        Result = apply(Module, main, [Args]),
+                        {ok, Module, Result, BeamPath, ErlangPath}
+                    catch
+                        Class:Reason:Stacktrace ->
+                            {error, {runtime_error, Class, Reason, Stacktrace}}
+                    end;
+                {error, Reason} -> {error, {beam_load_failed, Reason}}
+            end;
+        Error -> Error
+    end.
+
+module_name(Path) ->
+    Base = filename:basename(Path, filename:extension(Path)),
+    list_to_atom("terra_" ++ sanitize_lower(Base)).
+
+generate_module(Module, #{functions := Functions}) ->
+    ["-module(", atom_to_list(Module), ").\n",
+     "-export([main/1]).\n\n",
+     "main(Args) ->\n",
+     "    terra_fn_main(terra_args(Args)).\n\n",
+     [generate_function(Function) || Function <- Functions],
+     runtime_helpers()].
+
+generate_function(Function) ->
+    Name = maps:get(name, Function),
+    Params = maps:get(params, Function),
+    {ParamNames, Env, Counter} = bind_parameters(Params, 1, [], #{}),
+    {Body, _FinalEnv, _FinalCounter} =
+        generate_statements(maps:get(statements, Function, []), Env, Counter, 2, Name),
+    Default = default_value(maps:get(return_types, Function)),
+    Expressions = Body ++ [[indent(2), Default]],
+    [function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",
+     indent(1), "try\n",
+     join_expressions(Expressions), "\n",
+     indent(1), "catch\n",
+     indent(2), "throw:{terra_return, TerraReturnValue} -> TerraReturnValue\n",
+     indent(1), "end.\n\n"].
+
+bind_parameters([], Counter, Names, Env) ->
+    {lists:reverse(Names), Env, Counter};
+bind_parameters([Param | Rest], Counter, Names, Env) ->
+    TerraName = maps:get(name, Param),
+    ErlangName = variable_name(TerraName, Counter),
+    bind_parameters(Rest, Counter + 1, [ErlangName | Names],
+                    maps:put(TerraName, {direct, ErlangName}, Env)).
+
+generate_statements([], Env, Counter, _Level, _FunctionName) ->
+    {[], Env, Counter};
+generate_statements([Statement | Rest], Env, Counter, Level, FunctionName) ->
+    {Code, NewEnv, NextCounter} =
+        generate_statement(Statement, Env, Counter, Level, FunctionName),
+    {Remaining, FinalEnv, FinalCounter} =
+        generate_statements(Rest, NewEnv, NextCounter, Level, FunctionName),
+    {[Code | Remaining], FinalEnv, FinalCounter}.
+
+generate_statement(#{kind := variable, name := Name, value := Value} = Statement,
+                   Env, Counter, Level, _FunctionName) ->
+    ErlangName = variable_name(Name, Counter),
+    ValueCode = expression(Value, Env),
+    Eval = maps:get(eval, Statement, runtime),
+    case Eval of
+        lazy ->
+            {[indent(Level), ErlangName, " = fun() -> ", ValueCode, " end"],
+             maps:put(Name, {lazy, ErlangName}, Env), Counter + 1};
+        _ ->
+            {[indent(Level), ErlangName, " = ", ValueCode],
+             maps:put(Name, {direct, ErlangName}, Env), Counter + 1}
+    end;
+generate_statement(#{kind := multi_binding, bindings := Bindings, value := Value},
+                   Env, Counter, Level, _FunctionName) ->
+    {Names, NewEnv, NextCounter} = bind_result_names(Bindings, Counter, Env, []),
+    {[indent(Level), "{", lists:join(", ", Names), "} = ", expression(Value, Env)],
+     NewEnv, NextCounter};
+generate_statement(#{kind := call, name := stdout, args := Args},
+                   Env, Counter, Level, _FunctionName) ->
+    Values = [expression(Arg, Env) || Arg <- Args],
+    {[indent(Level), "terra_stdout([", lists:join(", ", Values), "])"],
+     Env, Counter};
+generate_statement(#{kind := call, name := Name, args := Args,
+                     invocation := Invocation}, Env, Counter, Level, _FunctionName) ->
+    Call = function_call(Name, Args, Env),
+    Code = case Invocation of
+               once -> ["terra_once(", io_lib:format("~p", [Name]),
+                        ", fun() -> ", Call, " end)"];
+               repeated -> Call
+           end,
+    {[indent(Level), Code], Env, Counter};
+generate_statement(#{kind := return, values := Values}, Env, Counter,
+                   Level, _FunctionName) ->
+    Value = return_expression(Values, Env),
+    {[indent(Level), "throw({terra_return, ", Value, "})"], Env, Counter};
+generate_statement(#{kind := 'if', branches := Branches, else_branch := Else},
+                   Env, Counter, Level, FunctionName) ->
+    {Code, NextCounter} = generate_if(Branches, Else, Env, Counter, Level,
+                                      FunctionName),
+    {Code, Env, NextCounter};
+generate_statement(#{kind := unless, condition := Condition,
+                     statements := Statements, else_branch := Else},
+                   Env, Counter, Level, FunctionName) ->
+    {Body, _BodyEnv, Counter1} =
+        generate_statements(Statements, Env, Counter, Level + 2, FunctionName),
+    {ElseCode, Counter2} = generate_optional_block(Else, Env, Counter1,
+                                                   Level + 2, FunctionName),
+    Code = [indent(Level), "case ", expression(Condition, Env), " of\n",
+            indent(Level + 1), "false ->\n", block(Body, Level + 2), ";\n",
+            indent(Level + 1), "true ->\n", ElseCode, "\n",
+            indent(Level), "end"],
+    {Code, Env, Counter2};
+generate_statement(#{kind := switch, subject := Subject, cases := Cases},
+                   Env, Counter, Level, FunctionName) ->
+    {Clauses, NextCounter} = generate_cases(Cases, Env, Counter, Level + 1,
+                                            FunctionName, []),
+    {[indent(Level), "case ", expression(Subject, Env), " of\n",
+      lists:join(";\n", Clauses), "\n", indent(Level), "end"],
+     Env, NextCounter};
+generate_statement(#{kind := for_each, binding := Binding, iterable := Iterable,
+                     statements := Statements}, Env, Counter, Level, FunctionName) ->
+    ElementName = variable_name(Binding, Counter),
+    ItName = variable_name("it", Counter + 1),
+    LoopEnv = maps:put("it", {direct, ItName},
+                       maps:put(Binding, {direct, ElementName}, Env)),
+    {Body, _BodyEnv, NextCounter} =
+        generate_statements(Statements, LoopEnv, Counter + 2, Level + 1, FunctionName),
+    {[indent(Level), "terra_for_each(", expression(Iterable, Env),
+      ", fun(", ElementName, ", ", ItName, ") ->\n",
+      block(Body, Level + 1), "\n", indent(Level), "end)"], Env, NextCounter};
+generate_statement(#{kind := 'for', iterator := {call, range, [Limit]},
+                     statements := Statements}, Env, Counter, Level, FunctionName) ->
+    ItName = variable_name("it", Counter),
+    LoopEnv = maps:put("it", {direct, ItName}, Env),
+    {Body, _BodyEnv, NextCounter} =
+        generate_statements(Statements, LoopEnv, Counter + 1, Level + 1, FunctionName),
+    {[indent(Level), "terra_for_range(", expression(Limit, Env),
+      ", fun(", ItName, ") ->\n", block(Body, Level + 1), "\n",
+      indent(Level), "end)"], Env, NextCounter};
+generate_statement(#{kind := while, condition := Condition, statements := Statements},
+                   Env, Counter, Level, FunctionName) ->
+    generate_condition_loop("terra_while", Condition, Statements, Env, Counter,
+                            Level, FunctionName);
+generate_statement(#{kind := do_while, condition := Condition, statements := Statements},
+                   Env, Counter, Level, FunctionName) ->
+    generate_condition_loop("terra_do_while", Condition, Statements, Env, Counter,
+                            Level, FunctionName);
+generate_statement(#{kind := Kind}, _Env, _Counter, _Level, _FunctionName) ->
+    throw({backend_error, {unsupported_statement, Kind}}).
+
+generate_condition_loop(Helper, Condition, Statements, Env, Counter,
+                        Level, FunctionName) ->
+    ItName = variable_name("it", Counter),
+    LoopEnv = maps:put("it", {direct, ItName}, Env),
+    {Body, _BodyEnv, NextCounter} =
+        generate_statements(Statements, LoopEnv, Counter + 1, Level + 1, FunctionName),
+    Code = [indent(Level), Helper, "(fun(", ItName, ") -> ",
+            expression(Condition, LoopEnv),
+            " end, fun(", ItName, ") ->\n", block(Body, Level + 1), "\n",
+            indent(Level), "end)"],
+    {Code, Env, NextCounter}.
+
+generate_if([Branch | Rest], Else, Env, Counter, Level, FunctionName) ->
+    {Body, _BodyEnv, Counter1} =
+        generate_statements(maps:get(statements, Branch), Env, Counter,
+                            Level + 2, FunctionName),
+    {Fallback, Counter2} = case Rest of
+                               [] -> generate_optional_block(Else, Env, Counter1,
+                                                             Level + 2, FunctionName);
+                               _ -> generate_if(Rest, Else, Env, Counter1,
+                                                Level + 2, FunctionName)
+                           end,
+    {[indent(Level), "case ", expression(maps:get(condition, Branch), Env), " of\n",
+      indent(Level + 1), "true ->\n", block(Body, Level + 2), ";\n",
+      indent(Level + 1), "false ->\n", Fallback, "\n",
+      indent(Level), "end"], Counter2}.
+
+generate_optional_block(none, _Env, Counter, Level, _FunctionName) ->
+    {[indent(Level), "ok"], Counter};
+generate_optional_block(Statements, Env, Counter, Level, FunctionName) ->
+    {Body, _BodyEnv, NextCounter} =
+        generate_statements(Statements, Env, Counter, Level, FunctionName),
+    {block(Body, Level), NextCounter}.
+
+generate_cases([], _Env, Counter, _Level, _FunctionName, Acc) ->
+    {lists:reverse(Acc), Counter};
+generate_cases([Case | Rest], Env, Counter, Level, FunctionName, Acc) ->
+    {Body, _BodyEnv, NextCounter} =
+        generate_statements(maps:get(statements, Case), Env, Counter,
+                            Level + 1, FunctionName),
+    Pattern = case maps:get(pattern, Case) of
+                  default -> "_";
+                  Value -> expression(Value, Env)
+              end,
+    Clause = [indent(Level), Pattern, " ->\n", block(Body, Level + 1)],
+    generate_cases(Rest, Env, NextCounter, Level, FunctionName, [Clause | Acc]).
+
+bind_result_names([], Counter, Env, Acc) ->
+    {lists:reverse(Acc), Env, Counter};
+bind_result_names([Binding | Rest], Counter, Env, Acc) ->
+    Name = maps:get(name, Binding),
+    ErlangName = variable_name(Name, Counter),
+    bind_result_names(Rest, Counter + 1,
+                      maps:put(Name, {direct, ErlangName}, Env),
+                      [ErlangName | Acc]).
+
+expression({int, Value}, _Env) -> integer_to_list(Value);
+expression({sint, Value}, _Env) -> integer_to_list(Value);
+expression({float, Value}, _Env) -> float_to_list(Value, [short]);
+expression({string, Value}, _Env) -> io_lib:format("~p", [Value]);
+expression({char, Value}, _Env) -> io_lib:format("$~c", [Value]);
+expression({bool, true}, _Env) -> "true";
+expression({bool, false}, _Env) -> "false";
+expression({atom, Value}, _Env) -> io_lib:format("~p", [Value]);
+expression({list, Values}, Env) ->
+    ["[", lists:join(", ", [expression(Value, Env) || Value <- Values]), "]"];
+expression({tuple, Values}, Env) ->
+    ["{", lists:join(", ", [expression(Value, Env) || Value <- Values]), "}"];
+expression({map, Pairs}, Env) ->
+    Entries = [[expression(Key, Env), " => ", expression(Value, Env)]
+               || {Key, Value} <- Pairs],
+    ["#{", lists:join(", ", Entries), "}"];
+expression({var_ref, Name}, Env) ->
+    case maps:find(Name, Env) of
+        {ok, {direct, ErlangName}} -> ErlangName;
+        {ok, {lazy, ErlangName}} -> [ErlangName, "()"];
+        error -> throw({backend_error, {unknown_codegen_variable, Name}})
+    end;
+expression({member, Value, Name}, Env) ->
+    ["terra_member(", expression(Value, Env), ", ", io_lib:format("~p", [list_to_atom(Name)]), ")"];
+expression({binary, Op, Left, Right}, Env) ->
+    ["(", expression(Left, Env), " ", operator(Op), " ", expression(Right, Env), ")"];
+expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
+
+function_call(Name, Args, Env) when is_list(Name) ->
+    [function_name(Name), "(",
+     lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
+function_call(tuple, Args, Env) ->
+    ["{", lists:join(", ", [expression(Arg, Env) || Arg <- Args]), "}"];
+function_call(list, Args, Env) ->
+    ["[", lists:join(", ", [expression(Arg, Env) || Arg <- Args]), "]"];
+function_call(map, [], _Env) -> "#{}";
+function_call(state, [], _Env) -> "#{}";
+function_call(string, [Arg], Env) ->
+    ["unicode:characters_to_binary(", expression(Arg, Env), ")"];
+function_call(Name, [Arg], Env)
+  when Name == number; Name == int; Name == sint; Name == float;
+       Name == atom; Name == bool -> expression(Arg, Env);
+function_call(range, [Limit], Env) ->
+    ["terra_range(", expression(Limit, Env), ")"];
+function_call(Name, _Args, _Env) ->
+    throw({backend_error, {unsupported_constructor, Name}}).
+
+return_expression([Value], Env) -> expression(Value, Env);
+return_expression(Values, Env) ->
+    ["{", lists:join(", ", [expression(Value, Env) || Value <- Values]), "}"].
+
+default_value([Type]) -> default_type(Type);
+default_value(Types) ->
+    ["{", lists:join(", ", [default_type(Type) || Type <- Types]), "}"].
+
+default_type(number) -> "0";
+default_type(int) -> "0";
+default_type(sint) -> "0";
+default_type(float) -> "0.0";
+default_type(string) -> "<<>>";
+default_type(bool) -> "false";
+default_type(atom) -> "undefined";
+default_type(list) -> "[]";
+default_type(tuple) -> "{}";
+default_type(map) -> "#{}";
+default_type(_) -> "undefined".
+
+operator(plus) -> "+";
+operator(minus) -> "-";
+operator(times) -> "*";
+operator(div_op) -> "/";
+operator(eq_eq) -> "=:=";
+operator(not_eq) -> "=/=";
+operator(lt) -> "<";
+operator(lt_eq) -> "=<";
+operator(gt) -> ">";
+operator(gt_eq) -> ">=".
+
+function_name(Name) -> "terra_fn_" ++ sanitize_lower(Name).
+
+variable_name(Name, Counter) ->
+    "Terra_" ++ sanitize_title(Name) ++ "_" ++ integer_to_list(Counter).
+
+sanitize_lower(Value) ->
+    [sanitize_char(C) || C <- string:lowercase(Value)].
+
+sanitize_title(Value) ->
+    [sanitize_char(C) || C <- Value].
+
+sanitize_char(C) when C >= $a, C =< $z -> C;
+sanitize_char(C) when C >= $A, C =< $Z -> C;
+sanitize_char(C) when C >= $0, C =< $9 -> C;
+sanitize_char($_) -> $_;
+sanitize_char(_) -> $_.
+
+join_expressions(Expressions) -> lists:join(",\n", Expressions).
+
+block([], Level) -> [indent(Level), "ok"];
+block(Expressions, _Level) -> join_expressions(Expressions).
+
+indent(Level) -> lists:duplicate(Level * 4, $\s).
+
+runtime_helpers() ->
+    "terra_args(Value) when is_binary(Value) -> Value;\n"
+    "terra_args(Value) -> unicode:characters_to_binary(Value).\n\n"
+    "terra_stdout([]) -> io:nl();\n"
+    "terra_stdout(Values) ->\n"
+    "    lists:foreach(fun terra_stdout_value/1, Values),\n"
+    "    ok.\n\n"
+    "terra_stdout_value(Value) when is_binary(Value) -> io:format(\"~ts~n\", [Value]);\n"
+    "terra_stdout_value(Value) -> io:format(\"~tp~n\", [Value]).\n\n"
+    "terra_once(Key, Fun) ->\n"
+    "    StoreKey = {?MODULE, terra_once, Key},\n"
+    "    case erlang:get(StoreKey) of\n"
+    "        undefined -> Value = Fun(), erlang:put(StoreKey, {done, Value}), Value;\n"
+    "        {done, Value} -> Value\n"
+    "    end.\n\n"
+    "terra_range(Limit) when Limit =< 0 -> [];\n"
+    "terra_range(Limit) -> lists:seq(0, trunc(Limit) - 1).\n\n"
+    "terra_for_range(Limit, Fun) -> lists:foreach(Fun, terra_range(Limit)).\n\n"
+    "terra_for_each(Value, Fun) ->\n"
+    "    Items = terra_iterable(Value),\n"
+    "    Indexed = lists:zip(Items, lists:seq(0, length(Items) - 1)),\n"
+    "    lists:foreach(fun({Item, Index}) -> Fun(Item, Index) end, Indexed).\n\n"
+    "terra_iterable(Value) when is_list(Value) -> Value;\n"
+    "terra_iterable(Value) when is_tuple(Value) -> tuple_to_list(Value);\n"
+    "terra_iterable(Value) when is_map(Value) -> maps:to_list(Value);\n"
+    "terra_iterable(Value) when is_binary(Value) -> binary_to_list(Value).\n\n"
+    "terra_while(Condition, Body) -> terra_while(Condition, Body, 0).\n"
+    "terra_while(Condition, Body, It) ->\n"
+    "    case Condition(It) of\n"
+    "        true -> Body(It), terra_while(Condition, Body, It + 1);\n"
+    "        false -> ok\n"
+    "    end.\n\n"
+    "terra_do_while(Condition, Body) -> terra_do_while(Condition, Body, 0).\n"
+    "terra_do_while(Condition, Body, It) ->\n"
+    "    Body(It),\n"
+    "    case Condition(It) of\n"
+    "        true -> terra_do_while(Condition, Body, It + 1);\n"
+    "        false -> ok\n"
+    "    end.\n\n"
+    "terra_member(Value, Key) when is_map(Value) -> maps:get(Key, Value);\n"
+    "terra_member(Value, Key) -> erlang:error({cannot_access_member, Key, Value}).\n".

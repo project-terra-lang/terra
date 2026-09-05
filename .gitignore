@@ -19,6 +19,7 @@ deps/
 .rebar3/
 _build/
 _checkouts/
+/terra_build/
 
 # Erlang.mk artifacts
 .erlang.mk/

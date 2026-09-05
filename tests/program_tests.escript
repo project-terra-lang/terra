@@ -9,16 +9,17 @@ main(_Args) ->
              {"loop condition", "tests/programs/loops_bad_condition.terra",
               fun(Result) ->
                   Result =:= {error, {in_function, "Main",
-                                      {expected_boolean_condition, int}}}
+                                      {expected_boolean_condition, int, {int, 10}}}}
               end},
              {"loop iterable", "tests/programs/loops_bad_iterable.terra",
               fun(Result) ->
-                  Result =:= {error, {in_function, "Main", {expected_iterable, int}}}
+                  Result =:= {error, {in_function, "Main",
+                                      {expected_iterable, int, {int, 10}}}}
               end},
              {"non-boolean condition", "tests/programs/control_bad_condition.terra",
               fun(Result) ->
                   Result =:= {error, {in_function, "Main",
-                                      {expected_boolean_condition, int}}}
+                                      {expected_boolean_condition, int, {int, 1}}}}
               end},
              {"non-exhaustive switch", "tests/programs/control_non_exhaustive.terra",
               fun(Result) ->
