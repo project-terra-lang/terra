@@ -40,6 +40,8 @@ compiler.
       parameters, shadowing, and ignored return values
 - [ ] Preserve generated Erlang source maps so runtime failures point back to Terra
 - [ ] Add deterministic compiler output and stable diagnostic codes for tools
+- [ ] Add Zigs "try" keyword to make the function run because by default functions can fail in this langauge
+- [ ] Add error propagation via the pipe operator "|>" if the pipe operator is used the error will get propagated via the program
 
 ## Milestone 2: Testing and Quality
 
