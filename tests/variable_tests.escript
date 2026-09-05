@@ -17,10 +17,16 @@ cases() ->
      {"data type metadata", "tests/variables/data_types.terra", fun expect_data_types/1},
      {"signed integer", "tests/variables/sint.terra", fun expect_sint/1},
      {"immutable reassignment", "tests/variables/immutable_reassign.terra",
-      fun(Result) -> Result =:= {error, {immutable_variable, "x"}} end},
+      fun(Result) ->
+          Result =:= {error, {immutable_variable, "x"}} orelse
+          Result =:= {error, {in_function, "Main", {immutable_variable, "x"}}}
+      end},
      {"type inference", "tests/variables/inference.terra", fun expect_inference/1},
      {"null rejection", "tests/variables/null_rejected.terra",
-      fun(Result) -> Result =:= {error, null_not_allowed} end},
+      fun(Result) ->
+          Result =:= {error, null_not_allowed} orelse
+          Result =:= {error, {in_function, "Main", null_not_allowed}}
+      end},
      {"destructuring", "tests/variables/destructure.terra", fun expect_destructure/1},
      {"use after move", "tests/variables/use_after_move.terra",
       fun(Result) -> Result =:= {error, {use_after_move, "pair"}} end},
@@ -48,10 +54,17 @@ run_case({Name, Path, Expect}) ->
 parse_main_variables(Path) ->
     case program:parse_file(Path) of
         {ok, Program} ->
-            variables:parse(program:entry_body(Program));
+            variables:parse(declaration_tokens(program:entry_body(Program)));
         {error, Reason} ->
             {error, Reason}
     end.
+
+declaration_tokens([{keyword, return} | _Rest]) ->
+    [];
+declaration_tokens([Token | Rest]) ->
+    [Token | declaration_tokens(Rest)];
+declaration_tokens([]) ->
+    [].
 
 expect_basic({ok, Vars}) ->
     length(Vars) == 8 andalso

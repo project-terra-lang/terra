@@ -1,10 +1,14 @@
 -module(program).
--export([parse/1, parse_file/1, entry_body/1]).
+-export([parse/1, parse_file/1, entry_body/1, passes/0]).
 
 parse(Tokens) ->
-    case parse_functions(Tokens, []) of
-        {ok, Functions} -> validate_and_parse(Functions);
-        Error -> Error
+    Context = #{tokens => Tokens,
+                legacy_tokens => spans:strip_tokens(Tokens),
+                source_span => spans:tokens_span(Tokens),
+                completed_passes => []},
+    case run_passes(pass_pipeline(), Context) of
+        {ok, #{program := Program}} -> {ok, Program};
+        Error -> annotate_error(Error, Tokens)
     end.
 
 parse_file(Path) ->
@@ -18,6 +22,67 @@ entry_body(#{entry := Entry, functions := Functions}) ->
         [Body] -> Body;
         _ -> []
     end.
+
+passes() ->
+    [Name || {Name, _Pass} <- pass_pipeline()].
+
+pass_pipeline() ->
+    [{parsing, fun parsing_pass/1},
+     {name_resolution, fun name_resolution_pass/1},
+     {type_checking, fun type_checking_pass/1},
+     {definite_return, fun definite_return_pass/1},
+     {lowering, fun lowering_pass/1}].
+
+run_passes([], Context) ->
+    {ok, Context};
+run_passes([{Name, Pass} | Rest], Context) ->
+    case Pass(Context) of
+        {ok, NextContext} ->
+            Completed = maps:get(completed_passes, NextContext, []),
+            run_passes(Rest, NextContext#{completed_passes => [Name | Completed]});
+        Error -> Error
+    end.
+
+parsing_pass(#{legacy_tokens := Tokens} = Context) ->
+    case parse_functions(Tokens, []) of
+        {ok, Functions} -> {ok, Context#{functions => Functions}};
+        Error -> Error
+    end.
+
+name_resolution_pass(#{functions := Functions} = Context) ->
+    case duplicate_name(Functions, []) of
+        none ->
+            case validate_main_function(Functions) of
+                ok ->
+                    {ok, Context#{entry => "Main", signatures => signatures(Functions)}};
+                Error -> Error
+            end;
+        "Main" -> {error, duplicate_entry_point};
+        Name -> {error, {duplicate_function, Name}}
+    end.
+
+type_checking_pass(#{functions := Functions, signatures := Signatures,
+                     entry := Entry} = Context) ->
+    case parse_bodies(Functions, Signatures, []) of
+        {ok, Parsed} ->
+            Program = #{kind => program, entry => Entry,
+                        functions => lists:reverse(Parsed)},
+            {ok, Context#{program => Program}};
+        Error -> Error
+    end.
+
+definite_return_pass(#{program := #{functions := Functions}} = Context) ->
+    case first_missing_return(Functions) of
+        none -> {ok, Context};
+        #{name := Name, return_types := ReturnTypes} ->
+            {error, {in_function, Name, {missing_return, ReturnTypes}}}
+    end.
+
+lowering_pass(#{program := Program, source_span := SourceSpan,
+                completed_passes := Completed} = Context) ->
+    Passes = lists:reverse([lowering | Completed]),
+    Lowered = (add_ast_spans(Program, SourceSpan))#{passes => Passes},
+    {ok, Context#{program => Lowered}}.
 
 parse_functions([], Acc) ->
     {ok, lists:reverse(Acc)};
@@ -64,9 +129,13 @@ parse_type_list(Other, _Acc) ->
     {error, {expected_return_type, Other}}.
 
 checked_type(Type, Value, Rest, ErrorTag) ->
-    case is_type(Type) of
-        true -> {ok, Value, Rest};
-        false -> {error, {ErrorTag, Type}}
+    case Type of
+        void -> {error, void_return_type};
+        _ ->
+            case is_type(Type) of
+                true -> {ok, Value, Rest};
+                false -> {error, {ErrorTag, Type}}
+            end
     end.
 
 return_type([Type]) -> Type;
@@ -98,13 +167,6 @@ take_body([T = {rbrace, "}"} | Rest], Depth, Acc) ->
 take_body([T | Rest], Depth, Acc) ->
     take_body(Rest, Depth, [T | Acc]).
 
-validate_and_parse(Functions) ->
-    case duplicate_name(Functions, []) of
-        none -> validate_main(Functions);
-        "Main" -> {error, duplicate_entry_point};
-        Name -> {error, {duplicate_function, Name}}
-    end.
-
 duplicate_name([], _Seen) -> none;
 duplicate_name([F | Rest], Seen) ->
     Name = maps:get(name, F),
@@ -113,59 +175,99 @@ duplicate_name([F | Rest], Seen) ->
         false -> duplicate_name(Rest, [Name | Seen])
     end.
 
-validate_main(Functions) ->
+validate_main_function(Functions) ->
     case [F || F <- Functions, maps:get(name, F) == "Main"] of
         [] -> {error, missing_entry_point};
         [#{return_types := [number],
            params := [#{type := string, name := "Args"}]}] ->
-            parse_bodies(Functions);
+            ok;
         [_] ->
             {error, {invalid_entry_point_signature,
                      "function Number Main(String Args) { ... }"}}
     end.
 
-parse_bodies(Functions) ->
-    Signatures = maps:from_list(
+signatures(Functions) ->
+    maps:from_list(
         [{maps:get(name, F), #{params => maps:get(params, F),
-                              return_types => maps:get(return_types, F)}} || F <- Functions]),
-    case parse_bodies(Functions, Signatures, []) of
-        {ok, Parsed} ->
-            {ok, #{kind => program, entry => "Main", functions => lists:reverse(Parsed)}};
-        Error -> Error
+                              return_types => maps:get(return_types, F)}} || F <- Functions]).
+
+env_from_bindings(Bindings) ->
+    [maps:from_list(Bindings)].
+
+env_child(Env) ->
+    [#{} | Env].
+
+env_put(Name, Type, [Scope | Rest]) ->
+    [maps:put(Name, Type, Scope) | Rest].
+
+env_has(Name, Env) ->
+    case env_find(Name, Env) of
+        {ok, _Type} -> true;
+        error -> false
     end.
+
+env_find(_Name, []) ->
+    error;
+env_find(Name, [Scope | Rest]) ->
+    case maps:find(Name, Scope) of
+        {ok, Type} -> {ok, Type};
+        error -> env_find(Name, Rest)
+    end.
+
+first_missing_return([]) ->
+    none;
+first_missing_return([#{statements := Statements} = Function | Rest]) ->
+    case statements_definitely_return(Statements) of
+        true -> first_missing_return(Rest);
+        false -> Function
+    end.
+
+statements_definitely_return([]) ->
+    false;
+statements_definitely_return([Statement | Rest]) ->
+    case statement_definitely_returns(Statement) of
+        true -> true;
+        false -> statements_definitely_return(Rest)
+    end.
+
+statement_definitely_returns(#{kind := return}) ->
+    true;
+statement_definitely_returns(#{kind := 'if', branches := Branches,
+                               else_branch := Else}) ->
+    Else =/= none andalso
+    all_statement_groups_return([maps:get(statements, Branch) || Branch <- Branches]) andalso
+    statements_definitely_return(Else);
+statement_definitely_returns(#{kind := unless, statements := Statements,
+                               else_branch := Else}) ->
+    Else =/= none andalso
+    statements_definitely_return(Statements) andalso
+    statements_definitely_return(Else);
+statement_definitely_returns(#{kind := switch, cases := Cases,
+                               exhaustive := true}) ->
+    all_statement_groups_return([maps:get(statements, Case) || Case <- Cases]);
+statement_definitely_returns(_Statement) ->
+    false.
+
+all_statement_groups_return(Groups) ->
+    Groups =/= [] andalso lists:all(fun statements_definitely_return/1, Groups).
 
 parse_bodies([], _Signatures, Acc) -> {ok, Acc};
 parse_bodies([F | Rest], Signatures, Acc) ->
-    Env = maps:from_list([{maps:get(name, P), maps:get(type, P)}
-                          || P <- maps:get(params, F)]),
+    Env = env_from_bindings([{maps:get(name, P), maps:get(type, P)}
+                             || P <- maps:get(params, F)]),
     case parse_statements(maps:get(body, F), F, Signatures, Env, []) of
         {ok, Statements, _} ->
-            case validate_legacy_variable_body(Statements, maps:get(body, F)) of
-                ok ->
-                    parse_bodies(Rest, Signatures,
-                                 [F#{statements => Statements} | Acc]);
-                Error -> Error
-            end;
+            parse_bodies(Rest, Signatures, [F#{statements => Statements} | Acc]);
         {error, Reason} -> {error, {in_function, maps:get(name, F), Reason}}
-    end.
-
-validate_legacy_variable_body(Statements, Body) ->
-    IsVariableStatement = fun(Statement) ->
-        Kind = maps:get(kind, Statement),
-        Kind == variable orelse Kind == multi_binding orelse
-        Kind == variable_declaration orelse Kind == unparsed_statement
-    end,
-    case lists:all(IsVariableStatement, Statements) of
-        true ->
-            case variables:parse(Body) of
-                {ok, _Variables} -> ok;
-                Error -> Error
-            end;
-        false -> ok
     end.
 
 parse_statements([], _F, _Sigs, Env, Acc) ->
     {ok, lists:reverse(Acc), Env};
+parse_statements([{id, Name}, {equals, "="} | _Rest], _F, _Sigs, Env, _Acc) ->
+    case env_has(Name, Env) of
+        true -> {error, {immutable_variable, Name}};
+        false -> {error, {unknown_variable, Name}}
+    end;
 parse_statements([{keyword, for_each} | Rest], F, Sigs, Env, Acc) ->
     parse_for_each(Rest, F, Sigs, Env, Acc);
 parse_statements([{keyword, 'for'} | Rest], F, Sigs, Env, Acc) ->
@@ -212,7 +314,7 @@ parse_statements([{keyword, const}, {id, Name}, {equals, "="} | Rest],
                 {ok, Type} ->
                     Stmt = #{kind => variable, scope => local, eval => const,
                              type => Type, name => Name, value => Value},
-                    parse_statements(Remaining, F, Sigs, maps:put(Name, Type, Env),
+                    parse_statements(Remaining, F, Sigs, env_put(Name, Type, Env),
                                      [Stmt | Acc]);
                 Error -> Error
             end;
@@ -230,9 +332,9 @@ parse_statements([{keyword, Scope}, {keyword, Type}, {id, Name}, {comma, ","} | 
     end;
 parse_statements([{keyword, Scope} | _] = Tokens, F, Sigs, Env, Acc)
   when Scope == global; Scope == local; Scope == temp ->
-    preserve_declaration(Tokens, F, Sigs, Env, Acc);
-parse_statements(Tokens, F, Sigs, Env, Acc) ->
-    preserve_statement(Tokens, F, Sigs, Env, Acc).
+    parse_scoped_statement(Tokens, F, Sigs, Env, Acc);
+parse_statements(Tokens, _F, _Sigs, _Env, _Acc) ->
+    {error, {unsupported_statement, Tokens}}.
 
 parse_call_statement(Name, Tokens, F, Sigs, Env, Acc) ->
     case parse_call(Name, Tokens, Sigs, Env) of
@@ -253,7 +355,8 @@ parse_for_each([{id, Binding}, {keyword, 'in'} | Rest], F, Sigs, Env, Acc) ->
                 {ok, IterableType} ->
                     case iterable_type(IterableType) of
                         true ->
-                            LoopEnv = maps:put("it", var, maps:put(Binding, var, Env)),
+                            LoopEnv = env_put("it", int,
+                                              env_put(Binding, var, env_child(Env))),
                             parse_loop_body(for_each, BodyStart, Rest, F, Sigs, Env,
                                             LoopEnv, Acc,
                                             #{binding => Binding, iterable => Iterable});
@@ -270,7 +373,7 @@ parse_for_each(Other, _F, _Sigs, _Env, _Acc) ->
 parse_for_range(Tokens, F, Sigs, Env, Acc) ->
     case parse_expr(Tokens, Sigs, Env) of
         {ok, {call, range, Args} = Range, [{lbrace, "{"} | BodyStart]} ->
-            LoopEnv = maps:put("it", int, Env),
+            LoopEnv = env_put("it", int, env_child(Env)),
             parse_loop_body('for', BodyStart, Tokens, F, Sigs, Env, LoopEnv, Acc,
                             #{iterator => Range, args => Args});
         {ok, OtherIterator, _Rest} -> {error, {expected_range_iterator, OtherIterator}};
@@ -278,7 +381,7 @@ parse_for_range(Tokens, F, Sigs, Env, Acc) ->
     end.
 
 parse_condition_loop(Kind, Tokens, F, Sigs, Env, Acc) ->
-    LoopEnv = maps:put("it", int, Env),
+    LoopEnv = env_put("it", int, env_child(Env)),
     case parse_expr(Tokens, Sigs, LoopEnv) of
         {ok, Condition, [{lbrace, "{"} | BodyStart]} ->
             case require_bool(Condition, Sigs, LoopEnv) of
@@ -334,7 +437,7 @@ parse_condition_branch(Tokens, F, Sigs, Env) ->
                 ok ->
                     case take_body(BodyStart, 1, []) of
                         {ok, Body, Rest} ->
-                            case parse_statements(Body, F, Sigs, Env, []) of
+                            case parse_statements(Body, F, Sigs, env_child(Env), []) of
                                 {ok, Statements, _} ->
                                     {ok, #{condition => Condition,
                                            statements => Statements}, Rest};
@@ -358,7 +461,7 @@ parse_if_tail([{keyword, 'else'}, {lbrace, "{"} | BodyStart], F, Sigs, Env,
               Branches, none) ->
     case take_body(BodyStart, 1, []) of
         {ok, Body, Rest} ->
-            case parse_statements(Body, F, Sigs, Env, []) of
+                    case parse_statements(Body, F, Sigs, env_child(Env), []) of
                 {ok, Statements, _} -> {ok, Branches, Statements, Rest};
                 Error -> Error
             end;
@@ -372,7 +475,7 @@ parse_unless(Tokens, F, Sigs, Env, Acc) ->
         {ok, Branch, [{keyword, 'else'}, {lbrace, "{"} | BodyStart]} ->
             case take_body(BodyStart, 1, []) of
                 {ok, ElseBody, Rest} ->
-                    case parse_statements(ElseBody, F, Sigs, Env, []) of
+                    case parse_statements(ElseBody, F, Sigs, env_child(Env), []) of
                         {ok, ElseStatements, _} ->
                             Stmt = #{kind => unless,
                                      condition => maps:get(condition, Branch),
@@ -413,10 +516,18 @@ parse_switch(Subject, BodyStart, F, Sigs, Env, Acc) ->
 
 parse_cases([], _SubjectType, _F, _Sigs, _Env, Acc, HasDefault) ->
     {ok, lists:reverse(Acc), HasDefault};
-parse_cases([{keyword, 'case'}, {atomprefix, ":"} | Rest], SubjectType,
+parse_cases([{keyword, 'case'}, {atomprefix, ":"}, {id, Name}, {atomprefix, ":"} | BodyTokens],
+            SubjectType, F, Sigs, Env, Acc, HasDefault) ->
+    Pattern = {atom, list_to_atom(Name)},
+    case types_compatible(SubjectType, atom) of
+        true -> parse_case_body(Pattern, BodyTokens, SubjectType,
+                                F, Sigs, Env, Acc, HasDefault);
+        false -> {error, {case_type_mismatch, SubjectType, atom}}
+    end;
+parse_cases([{keyword, 'case'}, {atomprefix, ":"} | BodyTokens], SubjectType,
             F, Sigs, Env, Acc, false) ->
-    parse_case_body(default, Rest, SubjectType, F, Sigs, Env, Acc, true);
-parse_cases([{keyword, 'case'}, {atomprefix, ":"} | _Rest], _SubjectType,
+    parse_case_body(default, BodyTokens, SubjectType, F, Sigs, Env, Acc, true);
+parse_cases([{keyword, 'case'}, {atomprefix, ":"} | _BodyTokens], _SubjectType,
             _F, _Sigs, _Env, _Acc, true) ->
     {error, duplicate_default_case};
 parse_cases([{keyword, 'case'} | Rest], SubjectType, F, Sigs, Env, Acc, HasDefault) ->
@@ -443,7 +554,7 @@ parse_case_body(Pattern, Tokens, SubjectType, F, Sigs, Env, Acc, HasDefault) ->
     case Pattern == default andalso Rest =/= [] of
         true -> {error, default_case_must_be_last};
         false ->
-            case parse_statements(Body, F, Sigs, Env, []) of
+            case parse_statements(Body, F, Sigs, env_child(Env), []) of
                 {ok, Statements, _} ->
                     Case = #{pattern => Pattern, statements => Statements},
                     parse_cases(Rest, SubjectType, F, Sigs, Env,
@@ -491,7 +602,7 @@ bind_multiple(Scope, Bindings, Tokens, F, Sigs, Env, Acc) ->
                             Items = [#{type => Type, name => Name} || {Type, Name} <- Bindings],
                             Stmt = #{kind => multi_binding, scope => Scope,
                                      bindings => Items, value => Value},
-                            NewEnv = lists:foldl(fun({T, N}, E) -> maps:put(N, T, E) end,
+                            NewEnv = lists:foldl(fun({T, N}, E) -> env_put(N, T, E) end,
                                                  Env, Bindings),
                             parse_statements(Remaining, F, Sigs, NewEnv, [Stmt | Acc]);
                         false -> {error, {return_type_mismatch, Expected, Actual}}
@@ -502,26 +613,26 @@ bind_multiple(Scope, Bindings, Tokens, F, Sigs, Env, Acc) ->
         Error -> Error
     end.
 
-preserve_declaration(Tokens, F, Sigs, Env, Acc) ->
+parse_scoped_statement(Tokens, F, Sigs, Env, Acc) ->
     case take_statement(Tokens, 0, []) of
         {ok, StatementTokens, Rest} ->
-            {Stmt, NewEnv} = structure_declaration(StatementTokens, Sigs, Env),
-            parse_statements(Rest, F, Sigs, NewEnv, [Stmt | Acc]);
+            case parse_scoped_declaration(StatementTokens, Sigs, Env) of
+                {ok, Stmt, NewEnv} ->
+                    parse_statements(Rest, F, Sigs, NewEnv, [Stmt | Acc]);
+                Error -> Error
+            end;
         Error -> Error
     end.
 
-structure_declaration([{keyword, Scope}, {keyword, Type}, {id, Name},
-                       {equals, "="} | ValueTokens] = Tokens, Sigs, Env) ->
-    structure_declaration_value(Scope, runtime, Type, Name, ValueTokens,
-                                Tokens, Sigs, Env);
-structure_declaration([{keyword, Scope}, {keyword, Modifier}, {keyword, Type},
-                       {id, Name}, {equals, "="} | ValueTokens] = Tokens, Sigs, Env)
+parse_scoped_declaration([{keyword, Scope}, {keyword, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Sigs, Env) ->
+    parse_declaration_value(Scope, runtime, Type, Name, ValueTokens, Sigs, Env);
+parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {keyword, Type},
+                          {id, Name}, {equals, "="} | ValueTokens], Sigs, Env)
   when Modifier == lazy; Modifier == const; Modifier == computed;
        Modifier == atomic; Modifier == thread_local ->
-    structure_declaration_value(Scope, Modifier, Type, Name, ValueTokens,
-                                Tokens, Sigs, Env);
-structure_declaration([{keyword, Scope}, {lparen, "("} | Rest] = Tokens,
-                      Sigs, Env) ->
+    parse_declaration_value(Scope, Modifier, Type, Name, ValueTokens, Sigs, Env);
+parse_scoped_declaration([{keyword, Scope}, {lparen, "("} | Rest], Sigs, Env) ->
     case parse_parenthesized_bindings(Rest, []) of
         {ok, Bindings, [{equals, "="} | ValueTokens]} ->
             case parse_expr(ValueTokens, Sigs, Env) of
@@ -529,22 +640,20 @@ structure_declaration([{keyword, Scope}, {lparen, "("} | Rest] = Tokens,
                     Items = [#{type => Type, name => Name}
                              || {Type, Name} <- Bindings],
                     NewEnv = lists:foldl(
-                        fun({Type, Name}, Current) -> maps:put(Name, Type, Current) end,
+                        fun({Type, Name}, Current) -> env_put(Name, Type, Current) end,
                         Env, Bindings),
-                    {#{kind => multi_binding, scope => Scope, bindings => Items,
-                       value => Value, tokens => Tokens}, NewEnv};
-                _ ->
-                    {#{kind => variable_declaration, tokens => Tokens}, Env}
+                    {ok, #{kind => multi_binding, scope => Scope, bindings => Items,
+                           value => Value}, NewEnv};
+                {ok, _Value, Other} -> {error, {expected_endofline, Other}};
+                Error -> Error
             end;
-        _ ->
-            {#{kind => variable_declaration, tokens => Tokens}, Env}
+        {ok, _Bindings, Other} -> {error, {expected_equals, Other}};
+        Error -> Error
     end;
-structure_declaration(Tokens, _Sigs, Env) ->
-    {#{kind => variable_declaration, tokens => Tokens},
-     track_declared_variable(Tokens, Env)}.
+parse_scoped_declaration(Tokens, _Sigs, _Env) ->
+    {error, {expected_variable_declaration, Tokens}}.
 
-structure_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens,
-                            Tokens, Sigs, Env) ->
+parse_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, Env) ->
     case parse_expr(ValueTokens, Sigs, Env) of
         {ok, Value, [{endofline, ";"}]} ->
             case single_type(Value, Sigs, Env) of
@@ -555,20 +664,17 @@ structure_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens,
                            end,
                     case type_accepts(Type, ActualType) of
                         true ->
-                            {#{kind => variable, scope => Scope, eval => Modifier,
+                             {ok, #{kind => variable, scope => Scope, eval => Modifier,
                                type => Type, name => Name, value => Value,
-                               tokens => Tokens}, maps:put(Name, Type, Env)};
+                               concurrency => concurrency(Modifier)},
+                             env_put(Name, Type, Env)};
                         false ->
-                            {#{kind => variable_declaration, tokens => Tokens},
-                             maps:put(Name, DeclaredType, Env)}
+                            {error, {type_mismatch, Type, Value}}
                     end;
-                {error, _} ->
-                    {#{kind => variable_declaration, tokens => Tokens},
-                     maps:put(Name, DeclaredType, Env)}
+                Error -> Error
             end;
-        _ ->
-            {#{kind => variable_declaration, tokens => Tokens},
-             maps:put(Name, DeclaredType, Env)}
+        {ok, _Value, Other} -> {error, {expected_endofline, Other}};
+        Error -> Error
     end.
 
 parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
@@ -578,32 +684,9 @@ parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {rparen, ")"} | Rest]
 parse_parenthesized_bindings(Other, _Acc) ->
     {error, {expected_destructure_binding, Other}}.
 
-track_declared_variable([{keyword, Scope}, {keyword, Type}, {id, Name},
-                         {equals, "="} | _], Env)
-  when Scope == global; Scope == local; Scope == temp ->
-    case is_type(Type) of
-        true -> maps:put(Name, Type, Env);
-        false -> Env
-    end;
-track_declared_variable([{keyword, Scope}, {keyword, Modifier}, {keyword, Type},
-                         {id, Name}, {equals, "="} | _], Env)
-  when (Scope == global orelse Scope == local orelse Scope == temp) andalso
-       (Modifier == lazy orelse Modifier == const orelse Modifier == computed orelse
-        Modifier == atomic orelse Modifier == thread_local) ->
-    case is_type(Type) of
-        true -> maps:put(Name, Type, Env);
-        false -> Env
-    end;
-track_declared_variable(_Tokens, Env) ->
-    Env.
-
-preserve_statement(Tokens, F, Sigs, Env, Acc) ->
-    case take_statement(Tokens, 0, []) of
-        {ok, StatementTokens, Rest} ->
-            Stmt = #{kind => unparsed_statement, tokens => StatementTokens},
-            parse_statements(Rest, F, Sigs, Env, [Stmt | Acc]);
-        Error -> Error
-    end.
+concurrency(atomic) -> atomic;
+concurrency(thread_local) -> thread_local;
+concurrency(_Modifier) -> shared.
 
 take_statement([], _Depth, _Acc) -> {error, unterminated_statement};
 take_statement([T = {endofline, ";"} | Rest], 0, Acc) ->
@@ -674,6 +757,8 @@ parse_primary([{string, V} | Rest], _Sigs, _Env) -> {ok, {string, V}, Rest};
 parse_primary([{char, V} | Rest], _Sigs, _Env) -> {ok, {char, V}, Rest};
 parse_primary([{keyword, V} | Rest], _Sigs, _Env) when V == true; V == false ->
     {ok, {bool, V}, Rest};
+parse_primary([{keyword, V} | Rest], _Sigs, _Env) when V == null; V == nil ->
+    {ok, null, Rest};
 parse_primary([{atomprefix, ":"}, {id, Name} | Rest], _Sigs, _Env) ->
     {ok, {atom, list_to_atom(Name)}, Rest};
 parse_primary([{id, Name}, {lparen, "("} | Rest], Sigs, Env) ->
@@ -796,6 +881,7 @@ infer_types({sint, _}, _Sigs, _Env) -> {ok, [sint]};
 infer_types({float, _}, _Sigs, _Env) -> {ok, [float]};
 infer_types({string, _}, _Sigs, _Env) -> {ok, [string]};
 infer_types({char, _}, _Sigs, _Env) -> {ok, [int]};
+infer_types(null, _Sigs, _Env) -> {error, null_not_allowed};
 infer_types({bool, _}, _Sigs, _Env) -> {ok, [bool]};
 infer_types({atom, _}, _Sigs, _Env) -> {ok, [atom]};
 infer_types({list, _}, _Sigs, _Env) -> {ok, [list]};
@@ -807,7 +893,7 @@ infer_types({member, Value, _Name}, Sigs, Env) ->
         Error -> Error
     end;
 infer_types({var_ref, Name}, _Sigs, Env) ->
-    case maps:find(Name, Env) of
+    case env_find(Name, Env) of
         {ok, Type} -> {ok, [Type]};
         error -> {error, {unknown_variable, Name}}
     end;
@@ -875,3 +961,65 @@ type_accepts(_, _) -> false.
 is_type(state) -> true;
 is_type(var) -> true;
 is_type(Type) -> datatypes:is_type(Type).
+
+add_ast_spans(Value, Span) when is_list(Value) ->
+    [add_ast_spans(Item, Span) || Item <- Value];
+add_ast_spans(Value, Span) when is_map(Value) ->
+    WithChildren = maps:map(fun(_Key, Child) -> add_ast_spans(Child, Span) end, Value),
+    case maps:is_key(kind, WithChildren) of
+        true ->
+            case maps:is_key(span, WithChildren) of
+                true -> WithChildren;
+                false -> WithChildren#{span => Span}
+            end;
+        false ->
+            WithChildren
+    end;
+add_ast_spans(Value, _Span) ->
+    Value.
+
+annotate_error({error, Reason}, Tokens) ->
+    {error, annotate_reason(Reason, Tokens)};
+annotate_error(Other, _Tokens) ->
+    Other.
+
+annotate_reason({in_function, Name, Reason}, Tokens) ->
+    {in_function, Name, annotate_reason(Reason, Tokens)};
+annotate_reason(Reason, Tokens) ->
+    case find_error_tokens(Reason) of
+        none -> Reason;
+        LegacyTokens ->
+            Span = spans:from_token_sequence(Tokens, LegacyTokens),
+            case Span == spans:unknown() of
+                true -> Reason;
+                false -> {with_span, Reason, Span}
+            end
+    end.
+
+find_error_tokens(Reason) when is_tuple(Reason) ->
+    find_error_tokens(tuple_to_list(Reason));
+find_error_tokens(Items) when is_list(Items) ->
+    case is_token_list(Items) of
+        true -> Items;
+        false -> find_error_tokens_in_list(Items)
+    end;
+find_error_tokens(_Reason) ->
+    none.
+
+find_error_tokens_in_list([]) ->
+    none;
+find_error_tokens_in_list([Item | Rest]) ->
+    case find_error_tokens(Item) of
+        none -> find_error_tokens_in_list(Rest);
+        Tokens -> Tokens
+    end.
+
+is_token_list([]) ->
+    false;
+is_token_list(Tokens) ->
+    lists:all(fun is_token/1, Tokens).
+
+is_token({Kind, _Value}) when is_atom(Kind) ->
+    true;
+is_token(_Value) ->
+    false.

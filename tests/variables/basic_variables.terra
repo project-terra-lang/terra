@@ -7,4 +7,5 @@ local List nums = [1,2,3];
 local Tuple pair = (1, "one");
 local String name = "terra";
 local Float ratio = 10.5;
+return 0;
 }

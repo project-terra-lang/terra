@@ -4,6 +4,8 @@
 format({in_function, Name, Reason}) ->
     {Code, Message, Help} = format(Reason),
     {Code, io_lib:format("In function ~s: ~s", [Name, Message]), Help};
+format({with_span, Reason, _Span}) ->
+    format(Reason);
 format(missing_entry_point) ->
     {missing_entry_point,
      "No Main function was found.",
@@ -16,6 +18,10 @@ format({invalid_entry_point_signature, Signature}) ->
     {invalid_entry_point_signature,
      "Main has the wrong return type, parameter, or parameter name.",
      io_lib:format("Use: ~s", [Signature])};
+format(void_return_type) ->
+    {void_return_type,
+     "Terra does not have void functions.",
+     "Declare a concrete return type and return a value on every path."};
 format({unknown_function, Name}) ->
     {unknown_function,
      io_lib:format("Function ~s is not defined.", [name(Name)]),
@@ -49,6 +55,11 @@ format({return_type_mismatch, Expected, Actual}) ->
      io_lib:format("Expected return values ~s, but received ~s.",
                    [type_list(Expected), type_list(Actual)]),
      "Return and assign the same number of values in the declared type order."};
+format({missing_return, ReturnTypes}) ->
+    {missing_return,
+     io_lib:format("This function must return ~s on every path.",
+                   [type_list(ReturnTypes)]),
+     "Add an explicit return, or make every if/unless/switch branch return."};
 format({argument_type_mismatch, Name, Expected, Actual}) ->
     {argument_type_mismatch,
      io_lib:format("Call to ~s expects ~s, but received ~s.",
@@ -75,6 +86,18 @@ format({expected_function_declaration, _Tokens}) ->
     {expected_function_declaration,
      "Code was found outside a function.",
      "Move executable code into Main or another function."};
+format({expected_return_type, _Tokens}) ->
+    {expected_return_type,
+     "Every function must declare a return type.",
+     "Write function Number Name(...) or another concrete return type."};
+format({expected_variable_declaration, _Tokens}) ->
+    {expected_variable_declaration,
+     "This variable declaration is not valid Terra syntax.",
+     "Use scope, optional modifier, type, name, initializer, and a semicolon."};
+format({unsupported_statement, _Tokens}) ->
+    {unsupported_statement,
+     "This statement is not valid Terra syntax yet.",
+     "Use a declaration, call, return, condition, switch, or loop statement."};
 format(unterminated_function_body) ->
     {unterminated_function_body,
      "A function body is missing its closing brace.",
@@ -135,7 +158,11 @@ render(Path, Reason) ->
     case file:read_file(Path) of
         {ok, Source} ->
             Lines = string:split(binary_to_list(Source), "\n", all),
-            case locate(Lines, Reason) of
+            LocationResult = case locate(Reason) of
+                                 none -> locate(Lines, Reason);
+                                 SpanLocation -> SpanLocation
+                             end,
+            case LocationResult of
                 none ->
                     [diagnostic_header(Title, Path), "\n",
                      Message, "\n\nHint: ", Help, "\n"];
@@ -149,6 +176,23 @@ render(Path, Reason) ->
             [diagnostic_header(Title, Path), "\n",
              Message, "\n\nHint: ", Help, "\n"]
     end.
+
+locate({with_span, _Reason, Span}) ->
+    span_location(Span);
+locate({in_function, _Name, Reason}) ->
+    locate(Reason);
+locate(_Reason) ->
+    none.
+
+span_location(#{start := #{line := Line, column := Column},
+                'end' := #{line := Line, column := EndColumn}})
+  when Line > 0, Column > 0 ->
+    {Line, Column, max(1, EndColumn - Column)};
+span_location(#{start := #{line := Line, column := Column}})
+  when Line > 0, Column > 0 ->
+    {Line, Column, 1};
+span_location(_Span) ->
+    none.
 
 diagnostic_header(Title, Location) ->
     DashCount = max(3, 34 - length(Title)),

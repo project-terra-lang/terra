@@ -40,6 +40,8 @@ main(_Args) ->
              {"top level code", "tests/programs/top_level_code.terra",
               fun(Result) ->
                   case Result of
+                      {error, {with_span, {expected_function_declaration, _Tokens}, Span}} ->
+                          maps:get(start, Span) == #{line => 1, column => 1, offset => 0};
                       {error, {expected_function_declaration, _Tokens}} -> true;
                       _ -> false
                   end
@@ -50,7 +52,27 @@ main(_Args) ->
               fun(Result) ->
                   Result =:= {error, {invalid_entry_point_signature,
                                       "function Number Main(String Args) { ... }"}}
-              end}],
+              end},
+             {"void return type", "tests/programs/void_return_type.terra",
+              fun(Result) -> Result =:= {error, void_return_type} end},
+             {"missing return type", "tests/programs/missing_return_type.terra",
+              fun expect_missing_return_type/1},
+             {"empty return", "tests/programs/empty_return.terra",
+              fun expect_empty_return/1},
+             {"missing return", "tests/programs/missing_return.terra",
+              fun expect_missing_return/1},
+             {"partial branch return", "tests/programs/partial_branch_return.terra",
+              fun expect_partial_branch_return/1},
+             {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
+              fun expect_branch_binding_leak/1},
+             {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
+              fun expect_switch_binding_leak/1},
+             {"loop binding does not leak", "tests/programs/loop_binding_leak.terra",
+              fun expect_loop_binding_leak/1},
+             {"explicit compiler passes", "tests/programs/main_ok.terra",
+              fun expect_passes/1},
+             {"complete ast has no raw-token fallbacks",
+              "examples/feature_showcase.terra", fun expect_complete_ast/1}],
     Results = [run_case(Case) || Case <- Cases],
     case lists:member(fail, Results) of
         true ->
@@ -145,3 +167,64 @@ expect_loops(_) ->
 
 has_kind(Kind, Statements) ->
     lists:any(fun(Statement) -> maps:get(kind, Statement) == Kind end, Statements).
+
+expect_branch_binding_leak({error, {in_function, "Main", {unknown_variable, "branch_value"}}}) ->
+    true;
+expect_branch_binding_leak(_) ->
+    false.
+
+expect_switch_binding_leak({error, {in_function, "Main", {unknown_variable, "case_value"}}}) ->
+    true;
+expect_switch_binding_leak(_) ->
+    false.
+
+expect_loop_binding_leak({error, {in_function, "Main", {unknown_variable, "it"}}}) ->
+    true;
+expect_loop_binding_leak(_) ->
+    false.
+
+expect_missing_return_type({error, {with_span, {expected_return_type, _Tokens}, _Span}}) ->
+    true;
+expect_missing_return_type({error, {expected_return_type, _Tokens}}) ->
+    true;
+expect_missing_return_type(_) ->
+    false.
+
+expect_empty_return({error, {in_function, "Main",
+                             {with_span, {expected_expression, _Tokens}, _Span}}}) ->
+    true;
+expect_empty_return({error, {in_function, "Main", {expected_expression, _Tokens}}}) ->
+    true;
+expect_empty_return(_) ->
+    false.
+
+expect_passes({ok, Program}) ->
+    Expected = [parsing, name_resolution, type_checking, definite_return, lowering],
+    program:passes() == Expected andalso maps:get(passes, Program) == Expected;
+expect_passes(_) ->
+    false.
+
+expect_missing_return({error, {in_function, "Main", {missing_return, [number]}}}) ->
+    true;
+expect_missing_return(_) ->
+    false.
+
+expect_partial_branch_return({error, {in_function, "Main", {missing_return, [number]}}}) ->
+    true;
+expect_partial_branch_return(_) ->
+    false.
+
+expect_complete_ast({ok, Program}) ->
+    not has_raw_fallback(Program);
+expect_complete_ast(_) ->
+    false.
+
+has_raw_fallback(Value) when is_map(Value) ->
+    maps:is_key(tokens, Value) orelse
+    maps:get(kind, Value, none) == unparsed_statement orelse
+    maps:get(kind, Value, none) == variable_declaration orelse
+    lists:any(fun has_raw_fallback/1, maps:values(Value));
+has_raw_fallback(Value) when is_list(Value) ->
+    lists:any(fun has_raw_fallback/1, Value);
+has_raw_fallback(_Value) ->
+    false.

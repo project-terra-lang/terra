@@ -44,8 +44,6 @@ format_statement(#{kind := multi_binding, bindings := Bindings}, _FunctionName, 
     [spaces(Indent), "- assigns multiple results to ", lists:join(", ", Names), "\n"];
 format_statement(#{kind := variable, name := Name, type := Type}, _FunctionName, Indent) ->
     [spaces(Indent), "- declares ", type_name(Type), " ", Name, "\n"];
-format_statement(#{kind := variable_declaration}, _FunctionName, Indent) ->
-    [spaces(Indent), "- declares a variable\n"];
 format_statement(#{kind := 'if', branches := Branches, else_branch := Else},
                  FunctionName, Indent) ->
     Count = length(Branches),

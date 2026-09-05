@@ -1,0 +1,376 @@
+# Terra Language Reference v0
+
+This document describes the implemented Terra v0 surface syntax. Terra is a
+small research language that transpiles to Erlang source and runs on the BEAM
+VM. The language should stay simple and grow incrementally.
+
+## Program Shape
+
+A Terra source file contains function declarations only. Every valid program
+must declare exactly one entry point:
+
+```terra
+function Number Main(String Args) {
+  return 0;
+}
+```
+
+The entry point receives command-line arguments as `String Args` and returns a
+`Number`.
+
+The current compiler pipeline is split into explicit passes:
+
+```text
+parsing -> name_resolution -> type_checking -> definite_return -> lowering -> codegen
+```
+
+`program:parse_file/1` runs the frontend passes and records them in the
+program AST. `transpiler:codegen_pass/1` turns that lowered AST into Erlang
+source.
+
+## Lexical Rules
+
+Whitespace separates tokens and has no meaning outside strings and character
+literals. Line comments start with `--` or `//` and continue to the end of the
+line.
+
+Identifiers begin with a letter or underscore and may contain letters, digits,
+and underscores. Keywords are reserved.
+
+String literals use double quotes and support `\n`, `\t`, `\r`, `\"`, and `\\`
+escapes. Character literals use single quotes around one character and evaluate
+as Erlang-compatible integer character values.
+
+## Types
+
+The current built-in types are:
+
+```text
+Number Int SInt Float Atom Bool Map List Tuple String State Var
+```
+
+`Number` accepts `Int`, `SInt`, and `Float` values. `Var` asks the compiler to
+infer the concrete type from the initializer. `State` is currently accepted as a
+research placeholder type for future runtime state semantics.
+
+`null` and `nil` are tokenized but rejected as variable values.
+
+## Functions
+
+Functions use the `function` keyword, a return type, a name, typed parameters,
+and a brace-delimited body.
+
+```terra
+function Int Double(Int value) {
+  return value * 2;
+}
+```
+
+Multiple return values are declared with parenthesized return types and compile
+as Erlang tuples.
+
+```terra
+function (String, Number) Analyze(Int value) {
+  return "score", value;
+}
+```
+
+Function bodies may call other functions declared in the same file. Calls are
+type checked against the callee parameters and return values.
+
+Every function must declare a concrete return type. Terra has no `Void` or
+`void` return type, and `return;` is not valid; a return statement must return
+one or more values matching the declared type list.
+
+```terra
+Analyze(10);
+```
+
+Writing a function name followed only by `;` marks a once-only invocation for
+code generation:
+
+```terra
+Initialize;
+```
+
+## Variables
+
+Variable declarations are immutable. Direct reassignment is rejected.
+
+```terra
+local Int count = 10;
+global State state = State();
+temp String label = "debug";
+```
+
+Supported declaration scopes are `global`, `local`, and `temp`. Supported
+declaration modifiers are:
+
+```text
+lazy const computed atomic thread_local
+```
+
+Examples:
+
+```terra
+local lazy Number delayed = Work();
+local const Int base = 2 + 3;
+local computed Int next = base + 1;
+local atomic Int counter = 0;
+local thread_local String session = "local";
+```
+
+`const` declarations fold simple literal expressions and const references during
+parsing. `computed`, `atomic`, `thread_local`, `global`, and `temp` currently
+preserve metadata for later compiler stages unless explicitly supported by
+codegen.
+
+Variable names may be shadowed by later declarations. References resolve to the
+newest visible binding in the current parser environment.
+
+Function bodies are lexical scopes. Control-flow bodies create child scopes:
+variables declared inside `if`, `elseif`, `else`, `unless`, switch cases, and
+loop bodies are visible inside that block and disappear after the closing brace.
+Loop helper bindings such as `it` and `for_each` item names are also block-local.
+
+## Destructuring And Multiple Binding
+
+Tuple destructuring binds multiple immutable variables:
+
+```terra
+local Tuple pair = (1, "one");
+local (Int id, String label) = pair;
+```
+
+Destructuring a tuple variable marks that source as moved for the variable
+parser, and later use of the moved source is rejected.
+
+Multiple return values can be assigned to typed locals:
+
+```terra
+local String label, Number value = Analyze(10);
+```
+
+## Expressions
+
+Implemented literals:
+
+```terra
+123
+-5
+10.5
+"hello"
+'T'
+true
+false
+:ready
+[1, 2, 3]
+(1, "one")
+#(:name => "Terra", :version => 1)
+```
+
+Function and constructor-style calls use parentheses:
+
+```terra
+Double(4)
+List()
+State()
+```
+
+Member access chains use dots and currently infer to `Var`:
+
+```terra
+profile.name
+item.it.value
+```
+
+Implemented operators, from tighter to looser binding:
+
+```text
+* /
++ -
+== != < <= > >=
+```
+
+Arithmetic currently requires compatible numeric types. String `+` concatenates
+two strings. Comparisons produce `Bool`; ordering comparisons are supported for
+numbers and strings.
+
+## Statements
+
+Statements usually end with `;`. Brace-delimited control-flow bodies do not use
+a trailing semicolon.
+
+### Return
+
+```terra
+return value;
+return first, second;
+```
+
+Return expressions must match the declared function return types.
+Every declared function must definitely return on every path. A trailing
+fall-through is rejected even though the backend can generate default Erlang
+values internally.
+
+### Console Output
+
+`stdout(...)` is the built-in console output intrinsic.
+
+```terra
+stdout("hello");
+stdout(value);
+```
+
+### Conditions
+
+Conditions must evaluate to `Bool`.
+
+```terra
+if total > 10 {
+  stdout("large");
+} elseif total == 10 {
+  stdout("exact");
+} else {
+  stdout("small");
+}
+```
+
+`unless` supports an optional `else` branch:
+
+```terra
+unless enabled {
+  stdout("disabled");
+} else {
+  stdout("enabled");
+}
+```
+
+### Switch
+
+Switch syntax is written as `if subject == { ... }`. Cases break by default and
+must include a final default `case:`.
+
+```terra
+if status == {
+  case :ready:
+    stdout("ready");
+  case:
+    stdout("unknown");
+}
+```
+
+Case patterns must be type-compatible with the switch subject. The default case
+must be last.
+
+### Loops
+
+`for_each` iterates over `List`, `Tuple`, `Map`, and `String` values. The body
+receives the named binding and an implicit `it` counter.
+
+```terra
+for_each name in names {
+  stdout(it);
+  stdout(name);
+}
+```
+
+`for` currently accepts only `range(limit)` and exposes `it`:
+
+```terra
+for range(3) {
+  stdout(it);
+}
+```
+
+`while` and `do_while` conditions must be `Bool` and also expose `it`:
+
+```terra
+while it < 2 {
+  stdout(it);
+}
+
+do_while it < 1 {
+  stdout(it)
+}
+```
+
+## Grammar Sketch
+
+This sketch is intentionally small and tracks the current parser. It is not yet
+a formal parser generator grammar.
+
+```ebnf
+program         = { function_decl } ;
+function_decl   = "function", return_types, identifier, "(", [ params ], ")",
+                  block ;
+return_types    = type | "(", type, { ",", type }, ")" ;
+params          = param, { ",", param } ;
+param           = type, identifier ;
+block           = "{", { statement }, "}" ;
+
+statement       = var_decl
+                | destructure_decl
+                | multi_binding
+                | return_stmt
+                | call_stmt
+                | once_call_stmt
+                | if_stmt
+                | unless_stmt
+                | switch_stmt
+                | for_each_stmt
+                | for_range_stmt
+                | while_stmt
+                | do_while_stmt ;
+
+var_decl        = scope, [ modifier ], type, identifier, "=", expr, ";" ;
+destructure_decl = scope, "(", binding, { ",", binding }, ")", "=", expr, ";" ;
+multi_binding   = scope, binding, ",", binding, { ",", binding }, "=", expr, ";" ;
+binding         = type, identifier ;
+scope           = "global" | "local" | "temp" ;
+modifier        = "lazy" | "const" | "computed" | "atomic" | "thread_local" ;
+
+return_stmt     = "return", expr, { ",", expr }, ";" ;
+call_stmt       = call, ";" ;
+once_call_stmt  = identifier, ";" ;
+
+if_stmt         = "if", expr, block, { "elseif", expr, block },
+                  [ "else", block ] ;
+unless_stmt     = "unless", expr, block, [ "else", block ] ;
+switch_stmt     = "if", expr, "==", "{", case_clause, { case_clause },
+                  default_case, "}" ;
+case_clause     = "case", expr, ":", { statement } ;
+default_case    = "case", ":", { statement } ;
+
+for_each_stmt   = "for_each", identifier, "in", expr, block ;
+for_range_stmt  = "for", call_to_range, block ;
+while_stmt      = "while", expr, block ;
+do_while_stmt   = "do_while", expr, block ;
+
+expr            = comparison ;
+comparison      = additive, [ comp_op, additive ] ;
+additive        = multiplicative, { add_op, multiplicative } ;
+multiplicative  = primary, { mul_op, primary } ;
+primary         = literal
+                | identifier
+                | call
+                | member
+                | list
+                | tuple_or_group
+                | map ;
+
+call            = identifier, "(", [ expr, { ",", expr } ], ")" ;
+member          = identifier, ".", identifier, { ".", identifier } ;
+list            = "[", [ expr, { ",", expr } ], "]" ;
+tuple_or_group  = "(", expr, [ ",", expr, { ",", expr } ], ")" ;
+map             = "#(", [ expr, "=>", expr, { ",", expr, "=>", expr } ], ")" ;
+
+comp_op         = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
+add_op          = "+" | "-" ;
+mul_op          = "*" | "/" ;
+```
+
+## Current Limits
+
+Boolean `&&`, boolean `||`, unary `!`, warnings, exact once-only semantics, and
+real `global`/`atomic`/`thread_local` runtime behavior are future work.

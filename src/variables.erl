@@ -6,7 +6,11 @@
 %% Lazy variables keep their initializer deferred for later compiler stages.
 
 parse(Tokens) ->
-    parse_declarations(Tokens, [], []).
+    SourceSpan = spans:tokens_span(Tokens),
+    case parse_declarations(spans:strip_tokens(Tokens), [], []) of
+        {ok, Variables} -> {ok, add_spans(Variables, SourceSpan)};
+        Error -> Error
+    end.
 
 parse_file(Path) ->
     case tokenizer:tokenize_file(Path) of
@@ -617,3 +621,22 @@ mark_moved(Name, Entry) ->
         true -> Entry#{state => moved};
         false -> Entry
     end.
+
+add_spans(Value, Span) when is_list(Value) ->
+    [add_spans(Item, Span) || Item <- Value];
+add_spans(Value, Span) when is_map(Value) ->
+    WithChildren = case maps:find(bindings, Value) of
+                       {ok, Bindings} -> Value#{bindings => add_spans(Bindings, Span)};
+                       error -> Value
+                   end,
+    case is_variable_node(WithChildren) andalso not maps:is_key(span, WithChildren) of
+        true -> WithChildren#{span => Span};
+        false -> WithChildren
+    end;
+add_spans(Value, _Span) ->
+    Value.
+
+is_variable_node(#{scope := _Scope, type := _Type}) ->
+    true;
+is_variable_node(_Value) ->
+    false.

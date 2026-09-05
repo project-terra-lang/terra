@@ -3,10 +3,8 @@
 
 %% Dump the tokens of a .terra file, one source line per output line.
 %%
-%% NOTE: this splits the source into lines and tokenizes each line on its own,
-%% because tokenize/1 returns a flat token list with no line information.
-%% Once tokens carry line numbers, replace this with a group-by over
-%% tokenize_file/1 and delete the splitting.
+%% Tokens now carry line and column spans. This printer still tokenizes one
+%% line at a time because its output is intentionally grouped by source line.
 print_file(Path) ->
     case first:check_file_extension(Path) of
         not_match ->

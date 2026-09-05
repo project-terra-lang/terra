@@ -46,11 +46,14 @@ temp Var zss = Var();
 2. Functions
 - Functions support multiple Return Values
 - Functions support tail-call optimization
+- Functions must always declare a concrete return type and return a value.
+- Terra has no `void` functions.
 - `name();` invokes a function normally and can run it multiple times.
 - `name;` marks a once-only invocation for the runtime/code-generation stage.
 - Terra programs run through one fixed entry point:
 ```lua
 function Number Main(String Args) {
+    return 0;
 }
 ```
 

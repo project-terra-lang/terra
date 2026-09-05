@@ -19,14 +19,14 @@ compiler.
 
 ## Milestone 1: Make the Compiler Trustworthy
 
-- [ ] Write a versioned Terra grammar and language reference
-- [ ] Add source spans to every token and AST node
-- [ ] Make parser diagnostics use exact spans instead of source-search heuristics
-- [ ] Replace all raw-token and `unparsed_statement` AST fallbacks
-- [ ] Split parsing, name resolution, type checking, lowering, and codegen into
+- [X] Write a versioned Terra grammar and language reference
+- [X] Add source spans to every token and AST node
+- [X] Make parser diagnostics use exact spans instead of source-search heuristics
+- [X] Replace all raw-token and `unparsed_statement` AST fallbacks
+- [X] Split parsing, name resolution, type checking, lowering, and codegen into
       explicit compiler passes
-- [ ] Add lexical block scopes and verify that branch/loop bindings never leak
-- [ ] Add definite-return analysis for every declared function return type
+- [X] Add lexical block scopes and verify that branch/loop bindings never leak
+- [X] Add definite-return analysis for every declared function return type
 - [ ] Detect unreachable statements after unconditional returns
 - [ ] Detect duplicate variables, duplicate cases, and invalid shadowing uniformly
 - [ ] Complete expression precedence, unary operators, boolean operators, and

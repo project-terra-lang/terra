@@ -4,7 +4,7 @@ main(_Args) ->
     code:add_pathz("./ebin"),
     Path = "tests/programs/backend_run.terra",
     OutDir = "/tmp/terra_backend_tests",
-    Results = [test_transpile(Path), test_compile(Path, OutDir), test_run(Path, OutDir),
+    Results = [test_codegen_pass(Path), test_transpile(Path), test_compile(Path, OutDir), test_run(Path, OutDir),
                test_showcase_compile(OutDir)],
     case lists:member(fail, Results) of
         true ->
@@ -13,6 +13,24 @@ main(_Args) ->
         false ->
             io:format("backend tests passed~n"),
             ok
+    end.
+
+test_codegen_pass(Path) ->
+    case program:parse_file(Path) of
+        {ok, Program} ->
+            case transpiler:codegen_pass(#{module => terra_backend_run, program => Program}) of
+                {ok, #{source := Source, passes := Passes}} ->
+                    Binary = iolist_to_binary(Source),
+                    expect("codegen pass",
+                           contains(Binary, <<"-module(terra_backend_run).">>) andalso
+                           lists:last(Passes) == codegen);
+                Other ->
+                    io:format("not ok - codegen pass~n  got: ~p~n", [Other]),
+                    fail
+            end;
+        Other ->
+            io:format("not ok - codegen pass parse~n  got: ~p~n", [Other]),
+            fail
     end.
 
 test_transpile(Path) ->

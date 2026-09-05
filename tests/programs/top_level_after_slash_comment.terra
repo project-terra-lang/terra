@@ -1,0 +1,2 @@
+// This comment should not be reported as the parser error location.
+local Number x = 10;

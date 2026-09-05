@@ -1,0 +1,3 @@
+function Main(String Args) {
+  return 0;
+}

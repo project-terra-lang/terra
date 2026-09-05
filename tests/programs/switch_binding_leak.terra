@@ -1,0 +1,12 @@
+function Number Main(String Args) {
+  local Atom status = :ready;
+
+  if status == {
+    case :ready:
+      local Int case_value = 1;
+      stdout(case_value);
+    case:
+  }
+
+  return case_value;
+}

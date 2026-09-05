@@ -1,11 +1,16 @@
 -module(transpiler).
--export([transpile_file/1, emit_file/2, compile_file/2, run_file/3, module_name/1]).
+-export([transpile_file/1, emit_file/2, compile_file/2, run_file/3, module_name/1,
+         codegen_pass/1]).
 
 transpile_file(Path) ->
     case program:parse_file(Path) of
         {ok, Program} ->
             Module = module_name(Path),
-            try {ok, Module, generate_module(Module, Program)}
+            try
+                case codegen_pass(#{module => Module, program => Program}) of
+                    {ok, #{source := Source}} -> {ok, Module, Source};
+                    Error -> Error
+                end
             catch
                 throw:{backend_error, Reason} -> {error, {backend, Reason}}
             end;
@@ -63,6 +68,11 @@ run_file(Path, Args, OutDir) ->
 module_name(Path) ->
     Base = filename:basename(Path, filename:extension(Path)),
     list_to_atom("terra_" ++ sanitize_lower(Base)).
+
+codegen_pass(#{module := Module, program := Program} = Context) ->
+    Source = generate_module(Module, Program),
+    Passes = maps:get(passes, Program, []) ++ [codegen],
+    {ok, Context#{source => Source, passes => Passes}}.
 
 generate_module(Module, #{functions := Functions}) ->
     ["-module(", atom_to_list(Module), ").\n",

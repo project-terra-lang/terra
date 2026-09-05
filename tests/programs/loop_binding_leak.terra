@@ -1,0 +1,11 @@
+function Number Main(String Args) {
+  local List items = [1, 2];
+
+  for_each item in items {
+    local Int loop_value = it;
+    stdout(item);
+    stdout(loop_value);
+  }
+
+  return it;
+}
