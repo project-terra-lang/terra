@@ -170,13 +170,19 @@ build_dir() ->
 
 check_file(Path) ->
     case program:parse_file(Path) of
-        {ok, _Ast} ->
+        {ok, Ast} ->
+            print_warnings(Path, maps:get(warnings, Ast, [])),
             io:format("terra: ~s ok~n", [Path]),
             ok;
         {error, Reason} ->
             print_error(Path, Reason),
             halt(1)
     end.
+
+print_warnings(_Path, []) -> ok;
+print_warnings(Path, [Warning | Rest]) ->
+    io:put_chars(diagnostics:render_warning(Path, Warning)),
+    print_warnings(Path, Rest).
 
 print_error(Path, bad_extension) ->
     io:format("terra: ~s: expected a .terra file~n", [Path]);

@@ -1,0 +1,15 @@
+function Number Produce() {
+    return 1;
+}
+
+function Number Analyze(Int used, Int spare) {
+    local Int value = used;
+    local Int value = 2;
+    local Int unused = 3;
+    Produce();
+    return value;
+}
+
+function Number Main(String Args) {
+    return Analyze(1, 2);
+}

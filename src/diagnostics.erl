@@ -1,5 +1,5 @@
 -module(diagnostics).
--export([format/1, render/2]).
+-export([format/1, render/2, render_warning/2]).
 
 format({in_function, Name, Reason}) ->
     {Code, Message, Help} = format(Reason),
@@ -204,6 +204,15 @@ render(Path, Reason) ->
     {Code, Message, Help} = format(Reason),
     Title = lists:flatten(
         string:uppercase(string:replace(atom_to_list(Code), "_", " ", all))),
+    render_formatted(Path, Reason, Title, Message, Help).
+
+render_warning(Path, Warning) ->
+    {Code, Message, Help} = format_warning(Warning),
+    Label = string:uppercase(string:replace(atom_to_list(Code), "_", " ", all)),
+    Reason = warning_reason(Warning),
+    render_formatted(Path, Reason, lists:flatten(["WARNING ", Label]), Message, Help).
+
+render_formatted(Path, Reason, Title, Message, Help) ->
     case file:read_file(Path) of
         {ok, Source} ->
             Lines = string:split(binary_to_list(Source), "\n", all),
@@ -225,6 +234,34 @@ render(Path, Reason) ->
             [diagnostic_header(Title, Path), "\n",
              Message, "\n\nHint: ", Help, "\n"]
     end.
+
+format_warning(#{code := unused_variable, function := Function, name := Name}) ->
+    {unused_variable,
+     io_lib:format("In function ~s: Variable ~s is never used.", [Function, Name]),
+     "Remove the binding or use its value."};
+format_warning(#{code := unused_parameter, function := Function, name := Name}) ->
+    {unused_parameter,
+     io_lib:format("In function ~s: Parameter ~s is never used.", [Function, Name]),
+     "Use the parameter, or remove it and update call sites."};
+format_warning(#{code := shadowed_variable, function := Function, name := Name}) ->
+    {shadowed_variable,
+     io_lib:format("In function ~s: Variable ~s shadows an earlier binding.",
+                   [Function, Name]),
+     "Rename the new binding if the shadowing is not intentional."};
+format_warning(#{code := ignored_return_value, function := Function, callee := Callee}) ->
+    {ignored_return_value,
+     io_lib:format("In function ~s: The return value from ~s is ignored.",
+                   [Function, Callee]),
+     "Bind or return the value when the result matters."}.
+
+warning_reason(#{code := unused_variable, function := Function, name := Name}) ->
+    {in_function, Function, {unused_variable, Name}};
+warning_reason(#{code := unused_parameter, function := Function, name := Name}) ->
+    {in_function, Function, {unused_parameter, Name}};
+warning_reason(#{code := shadowed_variable, function := Function, name := Name}) ->
+    {in_function, Function, {shadowed_variable, Name}};
+warning_reason(#{code := ignored_return_value, function := Function, callee := Callee}) ->
+    {in_function, Function, {ignored_return_value, Callee}}.
 
 locate({with_span, _Reason, Span}) ->
     span_location(Span);
@@ -295,6 +332,14 @@ locate_reason(Lines, Start, End, {duplicate_variable, Name}) ->
     locate_substring(Lines, Start, End, Name, last);
 locate_reason(Lines, Start, End, {invalid_shadowing, Name}) ->
     locate_substring(Lines, Start, End, Name, first);
+locate_reason(Lines, Start, End, {unused_variable, Name}) ->
+    locate_declaration(Lines, Start, End, Name, first);
+locate_reason(Lines, Start, End, {unused_parameter, Name}) ->
+    locate_substring(Lines, Start, End, Name, first);
+locate_reason(Lines, Start, End, {shadowed_variable, Name}) ->
+    locate_declaration(Lines, Start, End, Name, last);
+locate_reason(Lines, Start, End, {ignored_return_value, Callee}) ->
+    locate_substring(Lines, Start, End, Callee, first);
 locate_reason(Lines, Start, End, {return_type_mismatch, _Expected, _Actual}) ->
     case locate_after(Lines, Start, End, "return ") of
         none -> locate_after(Lines, Start, End, " = ");
@@ -421,6 +466,22 @@ locate_substring(Lines, Start, End, Needle, Direction) ->
         none -> none;
         {Number, Line} -> {Number, string:str(Line, Needle), max(1, length(Needle))}
     end.
+
+locate_declaration(Lines, Start, End, Name, Direction) ->
+    Matches = [{Number, Line} || {Number, Line} <- numbered_lines(Lines),
+                                Number >= Start, Number =< End,
+                                is_declaration_line(Line, Name)],
+    case choose_match(Matches, Direction) of
+        none -> locate_substring(Lines, Start, End, Name, Direction);
+        {Number, Line} -> {Number, string:str(Line, Name), max(1, length(Name))}
+    end.
+
+is_declaration_line(Line, Name) ->
+    Trimmed = string:trim(Line, leading),
+    HasScope = lists:any(fun(Scope) -> lists:prefix(Scope ++ " ", Trimmed) end,
+                         ["global", "local", "temp"]),
+    HasScope andalso
+    re:run(Trimmed, "\\b" ++ Name ++ "\\b", [{capture, none}]) == match.
 
 choose_match([], _Direction) -> none;
 choose_match(Matches, first) -> hd(Matches);

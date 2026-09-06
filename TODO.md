@@ -36,7 +36,7 @@ compiler.
 - [X] Define and implement exact semantics for `name;` once-only calls
 - [X] Implement real semantics for `global`, `atomic`, `thread_local`, and
       `computed` instead of lowering them as ordinary locals
-- [ ] Add warnings separately from errors, including unused variables, unused
+- [X] Add warnings separately from errors, including unused variables, unused
       parameters, shadowing, and ignored return values
 - [ ] Preserve generated Erlang source maps so runtime failures point back to Terra
 - [ ] Add deterministic compiler output and stable diagnostic codes for tools

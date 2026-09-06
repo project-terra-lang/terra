@@ -154,6 +154,8 @@ available for a future standard-library function.
 5. Developer Feedback
 - `terra check file.terra` reports a stable error code, a plain-language
   explanation, and a suggested fix.
+- Successful checks report non-failing warnings for unused variables,
+  unused parameters, shadowing, and ignored function return values.
 - `terra explain file.terra` prints a readable walkthrough of functions,
   control flow, loops, calls, recursion, and returns.
 - `terra ast file.terra` remains available for inspecting the compiler AST.

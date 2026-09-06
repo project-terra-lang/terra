@@ -21,7 +21,7 @@ The entry point receives command-line arguments as `String Args` and returns a
 The current compiler pipeline is split into explicit passes:
 
 ```text
-parsing -> name_resolution -> type_checking -> unreachable_code -> definite_return -> lowering -> codegen
+parsing -> name_resolution -> type_checking -> unreachable_code -> definite_return -> warning_analysis -> lowering -> codegen
 ```
 
 `program:parse_file/1` runs the frontend passes and records them in the
@@ -450,5 +450,11 @@ mul_op          = "*" | "/" ;
 
 ## Current Limits
 
-Warnings are future work. `temp` has distinct syntax and AST metadata but still
-shares local function lifetime.
+Warnings are reported separately from errors and do not make checking, building,
+or execution fail. The warning analysis currently reports unused variables,
+unused parameters, variable shadowing, and ignored user-function return values.
+Warnings are stored in the successful program AST under `warnings`, and
+`terra check` renders them before its final `ok` message.
+
+`temp` has distinct syntax and AST metadata but still shares local function
+lifetime.

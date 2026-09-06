@@ -32,6 +32,7 @@ pass_pipeline() ->
      {type_checking, fun type_checking_pass/1},
      {unreachable_code, fun unreachable_code_pass/1},
      {definite_return, fun definite_return_pass/1},
+     {warning_analysis, fun warning_analysis_pass/1},
      {lowering, fun lowering_pass/1}].
 
 run_passes([], Context) ->
@@ -106,6 +107,9 @@ definite_return_pass(#{program := #{functions := Functions}} = Context) ->
         #{name := Name, return_types := ReturnTypes} ->
             {error, {in_function, Name, {missing_return, ReturnTypes}}}
     end.
+
+warning_analysis_pass(#{program := Program} = Context) ->
+    {ok, Context#{program => Program#{warnings => warnings:analyze(Program)}}}.
 
 lowering_pass(#{program := Program, source_span := SourceSpan,
                 completed_passes := Completed} = Context) ->

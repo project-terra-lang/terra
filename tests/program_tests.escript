@@ -94,6 +94,8 @@ main(_Args) ->
               fun expect_atomic_number_invalid/1},
              {"duplicate global storage", "tests/programs/duplicate_global.terra",
               fun(Result) -> Result =:= {error, {duplicate_global, "shared"}} end},
+             {"warnings remain separate from errors", "tests/programs/warnings.terra",
+              fun expect_warnings/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -231,7 +233,7 @@ expect_empty_return(_) ->
 
 expect_passes({ok, Program}) ->
     Expected = [parsing, name_resolution, type_checking, unreachable_code,
-                definite_return, lowering],
+                definite_return, warning_analysis, lowering],
     program:passes() == Expected andalso maps:get(passes, Program) == Expected;
 expect_passes(_) ->
     false.
@@ -314,6 +316,13 @@ expect_global_computed_invalid(_) ->
 expect_atomic_number_invalid(
   {error, {in_function, "Main", {invalid_atomic_type, number}}}) -> true;
 expect_atomic_number_invalid(_) -> false.
+
+expect_warnings({ok, Program}) ->
+    Codes = [maps:get(code, Warning) || Warning <- maps:get(warnings, Program)],
+    lists:all(fun(Code) -> lists:member(Code, Codes) end,
+              [unused_variable, unused_parameter, shadowed_variable,
+               ignored_return_value]);
+expect_warnings(_) -> false.
 
 expect_complete_ast({ok, Program}) ->
     not has_raw_fallback(Program);
