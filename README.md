@@ -30,6 +30,11 @@ Tuple
 String
 ```
 
+Integers use BEAM arbitrary-precision arithmetic, so integer operations do not
+overflow. Mixed numeric arithmetic promotes to `Float`, then `SInt`, then
+`Int`; same-type integer arithmetic preserves its type, and `/` always produces
+`Float`. Numeric constructors provide explicit conversions.
+
 1. Variables
 - All Variables are Immutable
 ```lua
@@ -81,6 +86,8 @@ function Number Main(String Args) {
 
 3. Condition Handling
 - Conditions must evaluate to `Bool`.
+- Conditions support unary `!`, comparison operators, and short-circuiting
+  `&&` / `||` boolean operators.
 - Switch cases break by default and must include a final default `case:`.
 ```elixir
 # if..elseif..else

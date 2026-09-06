@@ -29,9 +29,9 @@ compiler.
 - [X] Add definite-return analysis for every declared function return type
 - [X] Detect unreachable statements after unconditional returns
 - [X] Detect duplicate variables, duplicate cases, and invalid shadowing uniformly
-- [ ] Complete expression precedence, unary operators, boolean operators, and
+- [X] Complete expression precedence, unary operators, boolean operators, and
       short-circuit evaluation
-- [ ] Define integer overflow, numeric conversion, division, and comparison rules
+- [X] Define integer overflow, numeric conversion, division, and comparison rules
 - [ ] Make tail-recursive calls compile to real BEAM tail calls
 - [ ] Define and implement exact semantics for `name;` once-only calls
 - [ ] Implement real semantics for `global`, `atomic`, `thread_local`, and

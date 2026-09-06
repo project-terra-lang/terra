@@ -1,0 +1,3 @@
+function Number Main(String Args) {
+    return Int("3");
+}

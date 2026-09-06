@@ -34,6 +34,10 @@ cases() ->
      {"lazy variable", "tests/variables/lazy.terra", fun expect_lazy/1},
      {"const and computed", "tests/variables/const_computed.terra", fun expect_const_computed/1},
      {"operator precedence", "tests/variables/operator_precedence.terra", fun expect_operator_precedence/1},
+     {"boolean operators", "tests/variables/boolean_operators.terra", fun expect_boolean_operators/1},
+     {"numeric rules", "tests/variables/numeric_rules.terra", fun expect_numeric_rules/1},
+     {"const division by zero", "tests/variables/divide_by_zero.terra",
+      fun(Result) -> Result =:= {error, divide_by_zero} end},
      {"const runtime rejection", "tests/variables/const_runtime_rejected.terra",
       fun(Result) -> Result =:= {error, {not_compile_time_constant, "base"}} end},
      {"concurrency", "tests/variables/concurrency.terra", fun expect_concurrency/1},
@@ -139,6 +143,25 @@ expect_operator_precedence({ok, Vars}) ->
               {binary, times, {var_ref, "grouped"}, {var_ref, "ordered"}}},
              computed, computed, Vars);
 expect_operator_precedence(_) ->
+    false.
+
+expect_boolean_operators({ok, Vars}) ->
+    has_eval("guarded", bool, {bool, false}, const, direct, Vars) andalso
+    has_eval("choice", bool, {bool, true}, const, direct, Vars) andalso
+    has_eval("runtime_choice", bool,
+             {binary, or_or, {var_ref, "choice"}, {var_ref, "guarded"}},
+             computed, computed, Vars);
+expect_boolean_operators(_) ->
+    false.
+
+expect_numeric_rules({ok, Vars}) ->
+    has_eval("difference", int, {int, -3}, const, direct, Vars) andalso
+    has_eval("ratio", float, {float, 2.5}, const, direct, Vars) andalso
+    has_eval("mixed", float, {float, 3.5}, const, direct, Vars) andalso
+    has_eval("comparison", bool, {bool, true}, const, direct, Vars) andalso
+    has_eval("narrowed", int, {int, 3}, const, direct, Vars) andalso
+    has_eval("signed", sint, {sint, -3}, const, direct, Vars);
+expect_numeric_rules(_) ->
     false.
 
 expect_concurrency({ok, Vars}) ->

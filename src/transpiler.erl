@@ -285,6 +285,10 @@ expression({var_ref, Name}, Env) ->
     end;
 expression({member, Value, Name}, Env) ->
     ["terra_member(", expression(Value, Env), ", ", io_lib:format("~p", [list_to_atom(Name)]), ")"];
+expression({unary, bang, Value}, Env) ->
+    ["(not ", expression(Value, Env), ")"];
+expression({unary, minus, Value}, Env) ->
+    ["(-", expression(Value, Env), ")"];
 expression({binary, Op, Left, Right}, Env) ->
     ["(", expression(Left, Env), " ", operator(Op), " ", expression(Right, Env), ")"];
 expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
@@ -300,9 +304,11 @@ function_call(map, [], _Env) -> "#{}";
 function_call(state, [], _Env) -> "#{}";
 function_call(string, [Arg], Env) ->
     ["unicode:characters_to_binary(", expression(Arg, Env), ")"];
-function_call(Name, [Arg], Env)
-  when Name == number; Name == int; Name == sint; Name == float;
-       Name == atom; Name == bool -> expression(Arg, Env);
+function_call(number, [Arg], Env) -> expression(Arg, Env);
+function_call(int, [Arg], Env) -> ["terra_to_int(", expression(Arg, Env), ")"];
+function_call(sint, [Arg], Env) -> ["terra_to_sint(", expression(Arg, Env), ")"];
+function_call(float, [Arg], Env) -> ["terra_to_float(", expression(Arg, Env), ")"];
+function_call(Name, [Arg], Env) when Name == atom; Name == bool -> expression(Arg, Env);
 function_call(range, [Limit], Env) ->
     ["terra_range(", expression(Limit, Env), ")"];
 function_call(Name, _Args, _Env) ->
@@ -332,12 +338,14 @@ operator(plus) -> "+";
 operator(minus) -> "-";
 operator(times) -> "*";
 operator(div_op) -> "/";
-operator(eq_eq) -> "=:=";
-operator(not_eq) -> "=/=";
+operator(eq_eq) -> "==";
+operator(not_eq) -> "/=";
 operator(lt) -> "<";
 operator(lt_eq) -> "=<";
 operator(gt) -> ">";
-operator(gt_eq) -> ">=".
+operator(gt_eq) -> ">=";
+operator(and_and) -> "andalso";
+operator(or_or) -> "orelse".
 
 function_name(Name) -> "terra_fn_" ++ sanitize_lower(Name).
 
@@ -372,6 +380,12 @@ runtime_helpers() ->
     "    ok.\n\n"
     "terra_stdout_value(Value) when is_binary(Value) -> io:format(\"~ts~n\", [Value]);\n"
     "terra_stdout_value(Value) -> io:format(\"~tp~n\", [Value]).\n\n"
+    "terra_to_int(Value) when is_integer(Value) -> Value;\n"
+    "terra_to_int(Value) when is_float(Value) -> trunc(Value).\n\n"
+    "terra_to_sint(Value) when is_integer(Value) -> Value;\n"
+    "terra_to_sint(Value) when is_float(Value) -> trunc(Value).\n\n"
+    "terra_to_float(Value) when is_float(Value) -> Value;\n"
+    "terra_to_float(Value) when is_integer(Value) -> float(Value).\n\n"
     "terra_once(Key, Fun) ->\n"
     "    StoreKey = {?MODULE, terra_once, Key},\n"
     "    case erlang:get(StoreKey) of\n"

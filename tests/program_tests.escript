@@ -75,6 +75,13 @@ main(_Args) ->
               fun expect_duplicate_case/1},
              {"invalid loop shadowing", "tests/programs/invalid_loop_shadowing.terra",
               fun expect_invalid_loop_shadowing/1},
+             {"expression precedence and boolean operators",
+              "tests/programs/expression_precedence_bool.terra",
+              fun expect_expression_precedence/1},
+             {"numeric rules", "tests/programs/numeric_rules.terra",
+              fun(Result) -> element(1, Result) =:= ok end},
+             {"invalid numeric conversion", "tests/programs/numeric_bad_conversion.terra",
+              fun expect_invalid_numeric_conversion/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -248,6 +255,28 @@ expect_invalid_loop_shadowing({error, {in_function, "Main",
                                        {invalid_shadowing, "it"}}}) ->
     true;
 expect_invalid_loop_shadowing(_) ->
+    false.
+
+expect_expression_precedence({ok, Program}) ->
+    Logic = find_function("Logic", maps:get(functions, Program)),
+    [#{kind := return, values := [Expression]}] = maps:get(statements, Logic),
+    Expression =:=
+        {binary, or_or,
+         {unary, bang, {var_ref, "a"}},
+         {binary, and_and,
+          {var_ref, "b"},
+          {binary, eq_eq,
+           {binary, plus,
+            {var_ref, "n"},
+            {binary, times, {int, 2}, {int, 3}}},
+           {int, 7}}}};
+expect_expression_precedence(_) ->
+    false.
+
+expect_invalid_numeric_conversion(
+  {error, {in_function, "Main", {invalid_numeric_conversion, string, int}}}) ->
+    true;
+expect_invalid_numeric_conversion(_) ->
     false.
 
 expect_complete_ast({ok, Program}) ->

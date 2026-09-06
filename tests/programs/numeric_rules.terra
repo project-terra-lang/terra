@@ -1,0 +1,15 @@
+function Float Ratio(Int total, SInt delta) {
+    return (total + delta) / 2;
+}
+
+function Bool Below(Int value, Float limit) {
+    return value < limit;
+}
+
+function Number Main(String Args) {
+    if Below(2, 2.5) {
+        return Ratio(6, -1);
+    } else {
+        return Int(0.0);
+    }
+}

@@ -1,0 +1,9 @@
+function Number Main(String Args) {
+    local const Int difference = 2 - 5;
+    local const Float ratio = 5 / 2;
+    local const Float mixed = 1 + 2.5;
+    local const Bool comparison = 2 < 2.5;
+    local const Int narrowed = Int(3.9);
+    local const SInt signed = SInt(-3.9);
+    return difference;
+}

@@ -819,6 +819,39 @@ parse_expr_list(Tokens, Close, Sigs, Env, Acc) ->
     end.
 
 parse_expr(Tokens, Sigs, Env) ->
+    parse_or(Tokens, Sigs, Env).
+
+parse_or(Tokens, Sigs, Env) ->
+    case parse_and(Tokens, Sigs, Env) of
+        {ok, Left, Rest} -> parse_or_rest(Left, Rest, Sigs, Env);
+        Error -> Error
+    end.
+
+parse_or_rest(Left, [{or_or, _} | Rest], Sigs, Env) ->
+    case parse_and(Rest, Sigs, Env) of
+        {ok, Right, Remaining} ->
+            parse_or_rest({binary, or_or, Left, Right}, Remaining, Sigs, Env);
+        Error -> Error
+    end;
+parse_or_rest(Left, Rest, _Sigs, _Env) ->
+    {ok, Left, Rest}.
+
+parse_and(Tokens, Sigs, Env) ->
+    case parse_compare(Tokens, Sigs, Env) of
+        {ok, Left, Rest} -> parse_and_rest(Left, Rest, Sigs, Env);
+        Error -> Error
+    end.
+
+parse_and_rest(Left, [{and_and, _} | Rest], Sigs, Env) ->
+    case parse_compare(Rest, Sigs, Env) of
+        {ok, Right, Remaining} ->
+            parse_and_rest({binary, and_and, Left, Right}, Remaining, Sigs, Env);
+        Error -> Error
+    end;
+parse_and_rest(Left, Rest, _Sigs, _Env) ->
+    {ok, Left, Rest}.
+
+parse_compare(Tokens, Sigs, Env) ->
     case parse_add(Tokens, Sigs, Env) of
         {ok, Left, [{Op, _} | Rest]}
           when Op == eq_eq; Op == not_eq; Op == lt; Op == lt_eq;
@@ -846,7 +879,7 @@ parse_add_rest(Left, [{Op, _} | Rest], Sigs, Env) when Op == plus; Op == minus -
 parse_add_rest(Left, Rest, _Sigs, _Env) -> {ok, Left, Rest}.
 
 parse_mul(Tokens, Sigs, Env) ->
-    case parse_primary(Tokens, Sigs, Env) of
+    case parse_unary(Tokens, Sigs, Env) of
         {ok, Left, Rest} -> parse_mul_rest(Left, Rest, Sigs, Env);
         Error -> Error
     end.
@@ -859,10 +892,25 @@ parse_mul_rest(Left, [{Op, _} | Rest], Sigs, Env) when Op == times; Op == div_op
     end;
 parse_mul_rest(Left, Rest, _Sigs, _Env) -> {ok, Left, Rest}.
 
+parse_unary([{minus, "-"}, {int, V} | Rest], _Sigs, _Env) ->
+    {ok, {sint, -V}, Rest};
+parse_unary([{minus, "-"}, {float, V} | Rest], _Sigs, _Env) ->
+    {ok, {float, -V}, Rest};
+parse_unary([{minus, "-"} | Rest], Sigs, Env) ->
+    case parse_unary(Rest, Sigs, Env) of
+        {ok, Value, Remaining} -> {ok, {unary, minus, Value}, Remaining};
+        Error -> Error
+    end;
+parse_unary([{bang, "!"} | Rest], Sigs, Env) ->
+    case parse_unary(Rest, Sigs, Env) of
+        {ok, Value, Remaining} -> {ok, {unary, bang, Value}, Remaining};
+        Error -> Error
+    end;
+parse_unary(Tokens, Sigs, Env) ->
+    parse_primary(Tokens, Sigs, Env).
+
 parse_primary([{int, V} | Rest], _Sigs, _Env) -> {ok, {int, V}, Rest};
-parse_primary([{minus, "-"}, {int, V} | Rest], _Sigs, _Env) -> {ok, {sint, -V}, Rest};
 parse_primary([{float, V} | Rest], _Sigs, _Env) -> {ok, {float, V}, Rest};
-parse_primary([{minus, "-"}, {float, V} | Rest], _Sigs, _Env) -> {ok, {float, -V}, Rest};
 parse_primary([{string, V} | Rest], _Sigs, _Env) -> {ok, {string, V}, Rest};
 parse_primary([{char, V} | Rest], _Sigs, _Env) -> {ok, {char, V}, Rest};
 parse_primary([{keyword, V} | Rest], _Sigs, _Env) when V == true; V == false ->
@@ -948,6 +996,9 @@ validate_call(stdout, Args, Sigs, Env) ->
         Error -> Error
     end;
 validate_call(range, Args, Sigs, Env) -> validate_range(Args, Sigs, Env);
+validate_call(Name, Args, Sigs, Env)
+  when Name == number; Name == int; Name == sint; Name == float ->
+    validate_numeric_conversion(Name, Args, Sigs, Env);
 validate_call(Name, Args, Sigs, Env) when is_list(Name) ->
     case maps:find(Name, Sigs) of
         {ok, #{params := Params, return_types := Returns}} ->
@@ -971,6 +1022,18 @@ validate_call(Name, Args, Sigs, Env) when is_atom(Name) ->
             end;
         false -> {error, {unknown_function, Name}}
     end.
+
+validate_numeric_conversion(Target, [Arg], Sigs, Env) ->
+    case single_type(Arg, Sigs, Env) of
+        {ok, Source} ->
+            case is_number_type(Source) of
+                true -> {ok, [Target]};
+                false -> {error, {invalid_numeric_conversion, Source, Target}}
+            end;
+        Error -> Error
+    end;
+validate_numeric_conversion(Target, Args, _Sigs, _Env) ->
+    {error, {numeric_conversion_arity, Target, 1, length(Args)}}.
 
 expression_types([], _Sigs, _Env, Acc) -> {ok, lists:reverse(Acc)};
 expression_types([Expr | Rest], Sigs, Env, Acc) ->
@@ -1014,13 +1077,18 @@ infer_types({binary, Op, Left, Right}, Sigs, Env) ->
         {{error, Reason}, _} -> {error, Reason};
         {_, {error, Reason}} -> {error, Reason}
     end;
+infer_types({unary, Op, Value}, Sigs, Env) ->
+    case single_type(Value, Sigs, Env) of
+        {ok, Type} -> unary_type(Op, Type);
+        {error, Reason} -> {error, Reason}
+    end;
 infer_types(_Expr, _Sigs, _Env) -> {error, unknown_type}.
 
 binary_type(plus, string, string) -> {ok, [string]};
-binary_type(Op, int, int) when Op == plus; Op == minus; Op == times -> {ok, [int]};
-binary_type(div_op, int, int) -> {ok, [float]};
-binary_type(Op, float, float) when Op == plus; Op == minus; Op == times; Op == div_op ->
-    {ok, [float]};
+binary_type(div_op, Left, Right) ->
+    numeric_binary_type(div_op, Left, Right);
+binary_type(Op, Left, Right) when Op == plus; Op == minus; Op == times ->
+    numeric_binary_type(Op, Left, Right);
 binary_type(Op, Left, Right) when Op == eq_eq; Op == not_eq ->
     case types_compatible(Left, Right) of
         true -> {ok, [bool]};
@@ -1031,9 +1099,34 @@ binary_type(Op, Left, Right) when Op == lt; Op == lt_eq; Op == gt; Op == gt_eq -
         true -> {ok, [bool]};
         false -> {error, {type_mismatch, Left, Right}}
     end;
+binary_type(Op, bool, bool) when Op == and_and; Op == or_or ->
+    {ok, [bool]};
 binary_type(_Op, Left, Right) -> {error, {type_mismatch, Left, Right}}.
 
+unary_type(bang, bool) -> {ok, [bool]};
+unary_type(minus, int) -> {ok, [sint]};
+unary_type(minus, Type) when Type == sint; Type == float; Type == number ->
+    {ok, [Type]};
+unary_type(minus, Type) -> {error, {type_mismatch, number, Type}};
+unary_type(_Op, Type) -> {error, {type_mismatch, unknown, Type}}.
+
+numeric_binary_type(Op, Left, Right) ->
+    case is_number_type(Left) andalso is_number_type(Right) of
+        true -> {ok, [numeric_result_type(Op, Left, Right)]};
+        false -> {error, {type_mismatch, Left, Right}}
+    end.
+
+numeric_result_type(div_op, _Left, _Right) -> float;
+numeric_result_type(_Op, number, _Right) -> number;
+numeric_result_type(_Op, _Left, number) -> number;
+numeric_result_type(_Op, float, _Right) -> float;
+numeric_result_type(_Op, _Left, float) -> float;
+numeric_result_type(_Op, sint, _Right) -> sint;
+numeric_result_type(_Op, _Left, sint) -> sint;
+numeric_result_type(_Op, int, int) -> int.
+
 types_compatible(Left, Right) ->
+    (is_number_type(Left) andalso is_number_type(Right)) orelse
     type_accepts(Left, Right) orelse type_accepts(Right, Left).
 
 orderable_types(Left, Right) ->

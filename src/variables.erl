@@ -119,7 +119,53 @@ is_type(var)   -> true;
 is_type(Type)  -> datatypes:is_type(Type).
 
 parse_expr(Tokens) ->
-    parse_add(Tokens).
+    parse_or(Tokens).
+
+parse_or(Tokens) ->
+    case parse_and(Tokens) of
+        {ok, Left, Rest} -> parse_or_rest(Left, Rest);
+        {error, Reason} -> {error, Reason}
+    end.
+
+parse_or_rest(Left, [{or_or, _Text} | Rest]) ->
+    case parse_and(Rest) of
+        {ok, Right, Remaining} ->
+            parse_or_rest({binary, or_or, Left, Right}, Remaining);
+        {error, Reason} ->
+            {error, Reason}
+    end;
+parse_or_rest(Left, Rest) ->
+    {ok, Left, Rest}.
+
+parse_and(Tokens) ->
+    case parse_compare(Tokens) of
+        {ok, Left, Rest} -> parse_and_rest(Left, Rest);
+        {error, Reason} -> {error, Reason}
+    end.
+
+parse_and_rest(Left, [{and_and, _Text} | Rest]) ->
+    case parse_compare(Rest) of
+        {ok, Right, Remaining} ->
+            parse_and_rest({binary, and_and, Left, Right}, Remaining);
+        {error, Reason} ->
+            {error, Reason}
+    end;
+parse_and_rest(Left, Rest) ->
+    {ok, Left, Rest}.
+
+parse_compare(Tokens) ->
+    case parse_add(Tokens) of
+        {ok, Left, [{Op, _Text} | Rest]}
+          when Op == eq_eq; Op == not_eq; Op == lt; Op == lt_eq;
+               Op == gt; Op == gt_eq ->
+            case parse_add(Rest) of
+                {ok, Right, Remaining} ->
+                    {ok, {binary, Op, Left, Right}, Remaining};
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        Result -> Result
+    end.
 
 parse_add(Tokens) ->
     case parse_mul(Tokens) of
@@ -138,7 +184,7 @@ parse_add_rest(Left, Rest) ->
     {ok, Left, Rest}.
 
 parse_mul(Tokens) ->
-    case parse_primary(Tokens) of
+    case parse_unary(Tokens) of
         {ok, Left, Rest} -> parse_mul_rest(Left, Rest);
         {error, Reason} -> {error, Reason}
     end.
@@ -153,14 +199,27 @@ parse_mul_rest(Left, [{Op, _Text} | Rest]) when Op == times; Op == div_op ->
 parse_mul_rest(Left, Rest) ->
     {ok, Left, Rest}.
 
+parse_unary([{minus, "-"}, {int, Value} | Rest]) ->
+    {ok, {sint, -Value}, Rest};
+parse_unary([{minus, "-"}, {float, Value} | Rest]) ->
+    {ok, {float, -Value}, Rest};
+parse_unary([{minus, "-"} | Rest]) ->
+    case parse_unary(Rest) of
+        {ok, Value, Remaining} -> {ok, {unary, minus, Value}, Remaining};
+        {error, Reason} -> {error, Reason}
+    end;
+parse_unary([{bang, "!"} | Rest]) ->
+    case parse_unary(Rest) of
+        {ok, Value, Remaining} -> {ok, {unary, bang, Value}, Remaining};
+        {error, Reason} -> {error, Reason}
+    end;
+parse_unary(Tokens) ->
+    parse_primary(Tokens).
+
 parse_primary([{int, Value} | Rest]) ->
     {ok, {int, Value}, Rest};
-parse_primary([{minus, "-"}, {int, Value} | Rest]) ->
-    {ok, {sint, -Value}, Rest};
 parse_primary([{float, Value} | Rest]) ->
     {ok, {float, Value}, Rest};
-parse_primary([{minus, "-"}, {float, Value} | Rest]) ->
-    {ok, {float, -Value}, Rest};
 parse_primary([{string, Value} | Rest]) ->
     {ok, {string, Value}, Rest};
 parse_primary([{keyword, true} | Rest]) ->
@@ -294,48 +353,94 @@ eval_const({var_ref, Name}, Env) ->
         {error, Reason} -> {error, Reason}
     end;
 eval_const({binary, Op, Left, Right}, Env) ->
-    case {eval_const(Left, Env), eval_const(Right, Env)} of
-        {{ok, LeftValue}, {ok, RightValue}} -> eval_binary(Op, LeftValue, RightValue);
-        {{error, Reason}, _} -> {error, Reason};
-        {_, {error, Reason}} -> {error, Reason}
+    eval_binary_const(Op, Left, Right, Env);
+eval_const({unary, Op, Value}, Env) ->
+    case eval_const(Value, Env) of
+        {ok, Evaluated} -> eval_unary(Op, Evaluated);
+        {error, Reason} -> {error, Reason}
+    end;
+eval_const({call, Name, [Arg]}, Env)
+  when Name == number; Name == int; Name == sint; Name == float ->
+    case eval_const(Arg, Env) of
+        {ok, Value} -> eval_numeric_conversion(Name, Value);
+        {error, Reason} -> {error, Reason}
     end;
 eval_const(_Value, _Env) ->
     {error, not_compile_time_constant}.
 
-eval_binary(plus, {int, A}, {int, B}) ->
-    {ok, {int, A + B}};
-eval_binary(plus, {sint, A}, {sint, B}) ->
-    {ok, {sint, A + B}};
-eval_binary(minus, {int, A}, {int, B}) ->
-    {ok, {int, A - B}};
-eval_binary(minus, {sint, A}, {sint, B}) ->
-    {ok, {sint, A - B}};
-eval_binary(times, {int, A}, {int, B}) ->
-    {ok, {int, A * B}};
-eval_binary(times, {sint, A}, {sint, B}) ->
-    {ok, {sint, A * B}};
-eval_binary(div_op, {int, _A}, {int, 0}) ->
-    {error, divide_by_zero};
-eval_binary(div_op, {sint, _A}, {sint, 0}) ->
-    {error, divide_by_zero};
-eval_binary(div_op, {int, A}, {int, B}) ->
-    {ok, {float, A / B}};
-eval_binary(div_op, {sint, A}, {sint, B}) ->
-    {ok, {float, A / B}};
-eval_binary(plus, {float, A}, {float, B}) ->
-    {ok, {float, A + B}};
-eval_binary(minus, {float, A}, {float, B}) ->
-    {ok, {float, A - B}};
-eval_binary(times, {float, A}, {float, B}) ->
-    {ok, {float, A * B}};
-eval_binary(div_op, {float, _A}, {float, B}) when B == 0.0 ->
-    {error, divide_by_zero};
-eval_binary(div_op, {float, A}, {float, B}) ->
-    {ok, {float, A / B}};
+eval_binary_const(and_and, Left, Right, Env) ->
+    case eval_const(Left, Env) of
+        {ok, {bool, false}} -> {ok, {bool, false}};
+        {ok, {bool, true}} -> eval_const(Right, Env);
+        {ok, Other} -> {error, {invalid_const_expression, Other, and_and}};
+        {error, Reason} -> {error, Reason}
+    end;
+eval_binary_const(or_or, Left, Right, Env) ->
+    case eval_const(Left, Env) of
+        {ok, {bool, true}} -> {ok, {bool, true}};
+        {ok, {bool, false}} -> eval_const(Right, Env);
+        {ok, Other} -> {error, {invalid_const_expression, Other, or_or}};
+        {error, Reason} -> {error, Reason}
+    end;
+eval_binary_const(Op, Left, Right, Env) ->
+    case {eval_const(Left, Env), eval_const(Right, Env)} of
+        {{ok, LeftValue}, {ok, RightValue}} -> eval_binary(Op, LeftValue, RightValue);
+        {{error, Reason}, _} -> {error, Reason};
+        {_, {error, Reason}} -> {error, Reason}
+    end.
+
+eval_unary(bang, {bool, Value}) ->
+    {ok, {bool, not Value}};
+eval_unary(minus, {int, Value}) ->
+    {ok, {sint, -Value}};
+eval_unary(minus, {sint, Value}) ->
+    {ok, {sint, -Value}};
+eval_unary(minus, {float, Value}) ->
+    {ok, {float, -Value}};
+eval_unary(Op, Value) ->
+    {error, {invalid_const_expression, Op, Value}}.
+
 eval_binary(plus, {string, A}, {string, B}) ->
     {ok, {string, <<A/binary, B/binary>>}};
+eval_binary(eq_eq, {bool, A}, {bool, B}) ->
+    {ok, {bool, A == B}};
+eval_binary(not_eq, {bool, A}, {bool, B}) ->
+    {ok, {bool, A =/= B}};
+eval_binary(and_and, {bool, A}, {bool, B}) ->
+    {ok, {bool, A andalso B}};
+eval_binary(or_or, {bool, A}, {bool, B}) ->
+    {ok, {bool, A orelse B}};
+eval_binary(Op, {LeftType, A}, {RightType, B})
+  when (LeftType == int orelse LeftType == sint orelse LeftType == float),
+       (RightType == int orelse RightType == sint orelse RightType == float),
+       (Op == plus orelse Op == minus orelse Op == times orelse Op == div_op orelse
+        Op == eq_eq orelse Op == not_eq orelse Op == lt orelse Op == lt_eq orelse
+        Op == gt orelse Op == gt_eq) ->
+    eval_numeric_binary(Op, LeftType, A, RightType, B);
 eval_binary(_Op, Left, Right) ->
     {error, {invalid_const_expression, Left, Right}}.
+
+eval_numeric_binary(div_op, _LeftType, _A, _RightType, B) when B == 0 ->
+    {error, divide_by_zero};
+eval_numeric_binary(div_op, _LeftType, A, _RightType, B) ->
+    {ok, {float, A / B}};
+eval_numeric_binary(eq_eq, _LeftType, A, _RightType, B) -> {ok, {bool, A == B}};
+eval_numeric_binary(not_eq, _LeftType, A, _RightType, B) -> {ok, {bool, A /= B}};
+eval_numeric_binary(lt, _LeftType, A, _RightType, B) -> {ok, {bool, A < B}};
+eval_numeric_binary(lt_eq, _LeftType, A, _RightType, B) -> {ok, {bool, A =< B}};
+eval_numeric_binary(gt, _LeftType, A, _RightType, B) -> {ok, {bool, A > B}};
+eval_numeric_binary(gt_eq, _LeftType, A, _RightType, B) -> {ok, {bool, A >= B}};
+eval_numeric_binary(Op, LeftType, A, RightType, B) ->
+    Value = case Op of plus -> A + B; minus -> A - B; times -> A * B end,
+    {ok, {numeric_result_type(Op, LeftType, RightType), Value}}.
+
+eval_numeric_conversion(number, Value) -> {ok, Value};
+eval_numeric_conversion(float, {_Type, Value}) when is_number(Value) ->
+    {ok, {float, Value * 1.0}};
+eval_numeric_conversion(sint, {_Type, Value}) when is_number(Value) ->
+    {ok, {sint, trunc(Value)}};
+eval_numeric_conversion(int, {_Type, Value}) when is_number(Value) ->
+    {ok, {int, trunc(Value)}}.
 
 parse_destructure(Scope, Tokens, Env) ->
     case parse_bindings(Tokens, []) of
@@ -482,11 +587,19 @@ infer_type({binary, Op, Left, Right}, Env) ->
         {{error, Reason}, _} -> {error, Reason};
         {_, {error, Reason}} -> {error, Reason}
     end;
+infer_type({unary, Op, Value}, Env) ->
+    case infer_type(Value, Env) of
+        {ok, Type} -> infer_unary_type(Op, Type);
+        {error, Reason} -> {error, Reason}
+    end;
 infer_type({call, state, Args}, Env) ->
     case infer_type_list(Args, Env) of
         ok -> {ok, state};
         {error, Reason} -> {error, Reason}
     end;
+infer_type({call, Name, Args}, Env)
+  when Name == number; Name == int; Name == sint; Name == float ->
+    infer_numeric_conversion(Name, Args, Env);
 infer_type({call, Name, Args}, Env) ->
     case infer_type_list(Args, Env) of
         ok -> {ok, {call, Name}};
@@ -530,21 +643,74 @@ type_accepts(_Type, _ValueType) -> false.
 
 infer_binary_type(plus, string, string) ->
     {ok, string};
-infer_binary_type(Op, int, int)
-  when Op == plus; Op == minus; Op == times ->
-    {ok, int};
-infer_binary_type(Op, sint, sint)
-  when Op == plus; Op == minus; Op == times ->
-    {ok, sint};
-infer_binary_type(div_op, int, int) ->
-    {ok, float};
-infer_binary_type(div_op, sint, sint) ->
-    {ok, float};
-infer_binary_type(Op, float, float)
-  when Op == plus; Op == minus; Op == times; Op == div_op ->
-    {ok, float};
+infer_binary_type(div_op, Left, Right) ->
+    infer_numeric_binary_type(div_op, Left, Right);
+infer_binary_type(Op, Left, Right) when Op == plus; Op == minus; Op == times ->
+    infer_numeric_binary_type(Op, Left, Right);
+infer_binary_type(Op, bool, bool)
+  when Op == eq_eq; Op == not_eq; Op == and_and; Op == or_or ->
+    {ok, bool};
+infer_binary_type(Op, Left, Right)
+  when Op == eq_eq; Op == not_eq ->
+    case (is_number_type(Left) andalso is_number_type(Right)) orelse
+         type_accepts(Left, Right) orelse type_accepts(Right, Left) of
+        true -> {ok, bool};
+        false -> {error, {type_mismatch, Left, Right}}
+    end;
+infer_binary_type(Op, Left, Right)
+  when Op == lt; Op == lt_eq; Op == gt; Op == gt_eq ->
+    case orderable_types(Left, Right) of
+        true -> {ok, bool};
+        false -> {error, {type_mismatch, Left, Right}}
+    end;
 infer_binary_type(_Op, LeftType, RightType) ->
     {error, {type_mismatch, LeftType, RightType}}.
+
+infer_unary_type(bang, bool) ->
+    {ok, bool};
+infer_unary_type(minus, int) -> {ok, sint};
+infer_unary_type(minus, Type) when Type == sint; Type == float; Type == number ->
+    {ok, Type};
+infer_unary_type(minus, Type) -> {error, {type_mismatch, number, Type}};
+infer_unary_type(_Op, Type) ->
+    {error, {type_mismatch, unknown, Type}}.
+
+infer_numeric_conversion(Target, [Arg], Env) ->
+    case infer_type(Arg, Env) of
+        {ok, Source} ->
+            case is_number_type(Source) of
+                true -> {ok, Target};
+                false -> {error, {invalid_numeric_conversion, Source, Target}}
+            end;
+        Error -> Error
+    end;
+infer_numeric_conversion(Target, Args, _Env) ->
+    {error, {numeric_conversion_arity, Target, 1, length(Args)}}.
+
+infer_numeric_binary_type(Op, Left, Right) ->
+    case is_number_type(Left) andalso is_number_type(Right) of
+        true -> {ok, numeric_result_type(Op, Left, Right)};
+        false -> {error, {type_mismatch, Left, Right}}
+    end.
+
+numeric_result_type(div_op, _Left, _Right) -> float;
+numeric_result_type(_Op, number, _Right) -> number;
+numeric_result_type(_Op, _Left, number) -> number;
+numeric_result_type(_Op, float, _Right) -> float;
+numeric_result_type(_Op, _Left, float) -> float;
+numeric_result_type(_Op, sint, _Right) -> sint;
+numeric_result_type(_Op, _Left, sint) -> sint;
+numeric_result_type(_Op, int, int) -> int.
+
+orderable_types(Left, Right) ->
+    (is_number_type(Left) andalso is_number_type(Right)) orelse
+    (Left == string andalso Right == string).
+
+is_number_type(number) -> true;
+is_number_type(int) -> true;
+is_number_type(sint) -> true;
+is_number_type(float) -> true;
+is_number_type(_) -> false.
 
 accessor(computed) ->
     computed;

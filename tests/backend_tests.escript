@@ -5,6 +5,7 @@ main(_Args) ->
     Path = "tests/programs/backend_run.terra",
     OutDir = "/tmp/terra_backend_tests",
     Results = [test_codegen_pass(Path), test_transpile(Path), test_compile(Path, OutDir), test_run(Path, OutDir),
+               test_short_circuit(OutDir), test_numeric_rules(OutDir),
                test_showcase_compile(OutDir)],
     case lists:member(fail, Results) of
         true ->
@@ -70,6 +71,27 @@ test_showcase_compile(OutDir) ->
             expect("compile feature showcase", filelib:is_file(BeamPath));
         Other ->
             io:format("not ok - compile feature showcase~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_short_circuit(OutDir) ->
+    Path = "tests/programs/backend_short_circuit.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_backend_short_circuit, 7, _BeamPath, _ErlangPath} ->
+            expect("short-circuit boolean operators", true);
+        Other ->
+            io:format("not ok - short-circuit boolean operators~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_numeric_rules(OutDir) ->
+    Path = "tests/programs/backend_numeric_rules.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_backend_numeric_rules, 5, _BeamPath, _ErlangPath} ->
+            expect("numeric conversions and mixed arithmetic", true);
+        Other ->
+            io:format("not ok - numeric conversions and mixed arithmetic~n  got: ~p~n",
+                      [Other]),
             fail
     end.
 

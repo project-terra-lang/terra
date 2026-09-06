@@ -100,6 +100,15 @@ format({range_arity, Expected, Actual}) ->
     {range_arity,
      io_lib:format("range expects ~p argument, but received ~p.", [Expected, Actual]),
      "Write range(limit), for example range(10)."};
+format({invalid_numeric_conversion, Source, Target}) ->
+    {invalid_numeric_conversion,
+     io_lib:format("Cannot convert ~s to ~s.", [type_name(Source), type_name(Target)]),
+     "Numeric constructors accept only Int, SInt, Float, or Number values."};
+format({numeric_conversion_arity, Target, Expected, Actual}) ->
+    {numeric_conversion_arity,
+     io_lib:format("~s conversion expects ~p argument, but received ~p.",
+                   [type_name(Target), Expected, Actual]),
+     "Pass exactly one numeric value to the conversion."};
 format(null_not_allowed) ->
     {null_not_allowed,
      "null and nil are not valid variable values.",

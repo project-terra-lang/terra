@@ -1,0 +1,6 @@
+function Number Main(String Args) {
+local const Bool guarded = false && 1 / 0 == 0.0;
+local const Bool choice = !guarded || true && false;
+local computed Bool runtime_choice = choice || guarded;
+return 0;
+}

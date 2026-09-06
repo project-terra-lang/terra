@@ -53,6 +53,36 @@ Number Int SInt Float Atom Bool Map List Tuple String State Var
 infer the concrete type from the initializer. `State` is currently accepted as a
 research placeholder type for future runtime state semantics.
 
+### Numeric Semantics
+
+`Int` and `SInt` both use BEAM arbitrary-precision integers. `SInt` marks
+explicitly signed source values, including negative literals, but neither type
+is a statically checked numeric range. Integer arithmetic therefore does not
+wrap or overflow. `Float` uses the BEAM floating-point representation; its
+precision and exceptional arithmetic behavior follow the Erlang runtime.
+
+For `+` and `*`, mixed operands promote in this order: `Float`, `SInt`, `Int`.
+Same-type integer arithmetic preserves its type; mixed subtraction follows the
+same promotion order. A statically broad `Number` operand produces `Number`.
+The `/` operator accepts any numeric pair and always produces `Float`.
+Division by a compile-time zero is rejected during constant evaluation;
+division by a runtime zero raises the ordinary BEAM arithmetic error.
+
+Numeric constructors perform explicit conversions and require exactly one
+numeric argument:
+
+```terra
+Float(3)    // 3.0
+SInt(3.9)   // 3, truncating toward zero
+Int(3.9)    // 3, truncating toward zero
+Number(3)   // preserves the runtime numeric value
+```
+
+`Int` and `SInt` both truncate floating-point inputs toward zero; they differ in
+their source-level type, not their BEAM representation. Numeric constructors do
+not parse strings or convert booleans. Mixed `Int`, `SInt`, and `Float` comparisons compare their
+numeric values and produce `Bool`; string ordering remains string-only.
+
 `null` and `nil` are tokenized but rejected as variable values.
 
 ## Functions
@@ -191,14 +221,18 @@ item.it.value
 Implemented operators, from tighter to looser binding:
 
 ```text
+! -
 * /
 + -
 == != < <= > >=
+&&
+||
 ```
 
-Arithmetic currently requires compatible numeric types. String `+` concatenates
-two strings. Comparisons produce `Bool`; ordering comparisons are supported for
-numbers and strings.
+Arithmetic follows the numeric promotion and division rules above. String `+`
+concatenates two strings. Comparisons produce `Bool`; ordering comparisons are
+supported for mixed numeric types and for two strings. `&&` and `||` require
+`Bool` operands and short-circuit in generated Erlang.
 
 ## Statements
 
@@ -353,10 +387,13 @@ for_range_stmt  = "for", call_to_range, block ;
 while_stmt      = "while", expr, block ;
 do_while_stmt   = "do_while", expr, block ;
 
-expr            = comparison ;
+expr            = logical_or ;
+logical_or      = logical_and, { "||", logical_and } ;
+logical_and     = comparison, { "&&", comparison } ;
 comparison      = additive, [ comp_op, additive ] ;
 additive        = multiplicative, { add_op, multiplicative } ;
-multiplicative  = primary, { mul_op, primary } ;
+multiplicative  = unary, { mul_op, unary } ;
+unary           = [ "!" | "-" ], unary | primary ;
 primary         = literal
                 | identifier
                 | call
@@ -378,5 +415,5 @@ mul_op          = "*" | "/" ;
 
 ## Current Limits
 
-Boolean `&&`, boolean `||`, unary `!`, warnings, exact once-only semantics, and
-real `global`/`atomic`/`thread_local` runtime behavior are future work.
+Warnings, exact once-only semantics, and real `global`/`atomic`/`thread_local`
+runtime behavior are future work.

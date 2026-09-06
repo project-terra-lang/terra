@@ -1,0 +1,11 @@
+function Bool Boom() {
+    return 1 / 0 == 0.0;
+}
+
+function Number Main(String Args) {
+    if false && Boom() {
+        return 1;
+    } else {
+        return 7;
+    }
+}
