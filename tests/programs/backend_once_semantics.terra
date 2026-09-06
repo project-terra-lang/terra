@@ -1,0 +1,15 @@
+function Number Touch() {
+    return 9;
+}
+
+function Number Normal() {
+    return 8;
+}
+
+function Number Main(String Args) {
+    Touch;
+    Touch;
+    Touch();
+    Normal();
+    return 7;
+}

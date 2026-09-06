@@ -108,6 +108,11 @@ function (String, Number) Analyze(Int value) {
 Function bodies may call other functions declared in the same file. Calls are
 type checked against the callee parameters and return values.
 
+A user-function call returned directly with `return Function(args);` is a tail
+call. The backend lowers these returns through a generated dispatch loop whose
+function call is in BEAM tail position, including self-recursive and mutually
+recursive calls. Calls followed by more work remain ordinary calls.
+
 Every function must declare a concrete return type. Terra has no `Void` or
 `void` return type, and `return;` is not valid; a return statement must return
 one or more values matching the declared type list.
@@ -116,12 +121,24 @@ one or more values matching the declared type list.
 Analyze(10);
 ```
 
-Writing a function name followed only by `;` marks a once-only invocation for
-code generation:
+Writing a zero-argument function name followed only by `;` makes a once-only
+invocation:
 
 ```terra
 Initialize;
 ```
+
+The once-only state is scoped to the generated module, target function, and
+current BEAM process. The first successful `Initialize;` executes the function
+and caches its return value; later `Initialize;` statements in that process
+reuse the cached value without executing the body. A normal `Initialize()` call
+always executes and neither reads nor writes the once-only cache. A different
+BEAM process has an independent cache.
+
+Failures are not cached, so a later once-only invocation may retry. Reentering
+the same once-only function before its first invocation finishes raises a
+`terra_once_reentrant` runtime error. The cache has process lifetime and is
+discarded when that BEAM process exits.
 
 ## Variables
 
@@ -415,5 +432,5 @@ mul_op          = "*" | "/" ;
 
 ## Current Limits
 
-Warnings, exact once-only semantics, and real `global`/`atomic`/`thread_local`
-runtime behavior are future work.
+Warnings and real `global`/`atomic`/`thread_local` runtime behavior are future
+work.

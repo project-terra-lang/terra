@@ -32,8 +32,8 @@ compiler.
 - [X] Complete expression precedence, unary operators, boolean operators, and
       short-circuit evaluation
 - [X] Define integer overflow, numeric conversion, division, and comparison rules
-- [ ] Make tail-recursive calls compile to real BEAM tail calls
-- [ ] Define and implement exact semantics for `name;` once-only calls
+- [X] Make tail-recursive calls compile to real BEAM tail calls
+- [X] Define and implement exact semantics for `name;` once-only calls
 - [ ] Implement real semantics for `global`, `atomic`, `thread_local`, and
       `computed` instead of lowering them as ordinary locals
 - [ ] Add warnings separately from errors, including unused variables, unused

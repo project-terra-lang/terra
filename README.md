@@ -54,7 +54,8 @@ temp Var zss = Var();
 - Functions must always declare a concrete return type and return a value.
 - Terra has no `void` functions.
 - `name();` invokes a function normally and can run it multiple times.
-- `name;` marks a once-only invocation for the runtime/code-generation stage.
+- `name;` invokes a zero-argument function successfully at most once per
+  generated module and BEAM process; `name()` always invokes normally.
 - Terra programs run through one fixed entry point:
 ```lua
 function Number Main(String Args) {
@@ -159,8 +160,8 @@ available for a future standard-library function.
   the BEAM VM.
 - `TERRA_BUILD_DIR` can override the default `terra_build/` output directory.
 - Terra multiple returns compile to Erlang tuples, immutable locals compile to
-  Erlang single-assignment variables, and recursive calls remain ordinary BEAM
-  function calls.
+  Erlang single-assignment variables, and calls returned directly from a
+  function compile through a constant-stack BEAM tail-call dispatch loop.
 
 Try the complete feature showcase:
 ```bash

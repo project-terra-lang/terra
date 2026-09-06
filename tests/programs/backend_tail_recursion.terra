@@ -1,0 +1,10 @@
+function Number Count(Int remaining, Int total) {
+    if remaining <= 0 {
+        return total;
+    }
+    return Count(remaining - 1, total + 1);
+}
+
+function Number Main(String Args) {
+    return Count(200000, 0);
+}

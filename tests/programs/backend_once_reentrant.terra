@@ -1,0 +1,9 @@
+function Number Reenter() {
+    Reenter;
+    return 1;
+}
+
+function Number Main(String Args) {
+    Reenter;
+    return 0;
+}

@@ -6,6 +6,9 @@ main(_Args) ->
     OutDir = "/tmp/terra_backend_tests",
     Results = [test_codegen_pass(Path), test_transpile(Path), test_compile(Path, OutDir), test_run(Path, OutDir),
                test_short_circuit(OutDir), test_numeric_rules(OutDir),
+               test_tail_recursion(OutDir),
+               test_once_semantics(OutDir), test_once_failure(OutDir),
+               test_once_reentrancy(OutDir),
                test_showcase_compile(OutDir)],
     case lists:member(fail, Results) of
         true ->
@@ -94,6 +97,97 @@ test_numeric_rules(OutDir) ->
                       [Other]),
             fail
     end.
+
+test_tail_recursion(OutDir) ->
+    Path = "tests/programs/backend_tail_recursion.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_backend_tail_recursion, Source},
+         {ok, terra_backend_tail_recursion, 200000, BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("real tail-recursive dispatch",
+                   contains(Binary, <<"terra_fn_count_tail_step">>) andalso
+                   contains(Binary,
+                            <<"{terra_tail_call, \"Count\", [TerraTailArg1, TerraTailArg2]} -> terra_fn_count(TerraTailArg1, TerraTailArg2)">>) andalso
+                   has_beam_tail_call(BeamPath, terra_fn_count, 2));
+        Other ->
+            io:format("not ok - real tail-recursive dispatch~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+has_beam_tail_call(BeamPath, Function, Arity) ->
+    case beam_disasm:file(BeamPath) of
+        {beam_file, _Module, _Exports, _Attributes, _CompileInfo, Functions} ->
+            lists:any(
+              fun({function, Candidate, CandidateArity, _Label, Instructions})
+                    when Candidate =:= Function, CandidateArity =:= Arity ->
+                      lists:any(fun(Instruction) ->
+                          is_tail_instruction(Instruction, Function, Arity)
+                      end, Instructions);
+                 (_) -> false
+              end, Functions);
+        _ -> false
+    end.
+
+is_tail_instruction({call_last, Arity, {_Module, Function, Arity}, _Deallocate},
+                    Function, Arity) -> true;
+is_tail_instruction({call_only, Arity, {_Module, Function, Arity}}, Function, Arity) -> true;
+is_tail_instruction(_Instruction, _Function, _Arity) -> false.
+
+test_once_semantics(OutDir) ->
+    Path = "tests/programs/backend_once_semantics.terra",
+    Module = terra_backend_once_semantics,
+    StoreKey = {Module, terra_once, "Touch"},
+    NormalKey = {Module, terra_once, "Normal"},
+    erlang:erase(StoreKey),
+    erlang:erase(NormalKey),
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, Module, 7, _BeamPath, _ErlangPath} ->
+            FirstCache = erlang:get(StoreKey),
+            SecondResult = apply(Module, main, [<<>>]),
+            SecondCache = erlang:get(StoreKey),
+            Parent = self(),
+            spawn(fun() ->
+                Result = apply(Module, main, [<<>>]),
+                Parent ! {once_child, Result, erlang:get(StoreKey)}
+            end),
+            ChildResult = receive
+                {once_child, Result, Cache} -> {Result, Cache}
+            after 5000 -> timeout
+            end,
+            NormalCache = erlang:get(NormalKey),
+            erlang:erase(StoreKey),
+            expect("once-only process-local success cache",
+                   FirstCache == {done, 9} andalso
+                   SecondResult == 7 andalso SecondCache == {done, 9} andalso
+                   ChildResult == {7, {done, 9}} andalso
+                   NormalCache == undefined);
+        Other ->
+            io:format("not ok - once-only process-local success cache~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_once_failure(OutDir) ->
+    Path = "tests/programs/backend_once_failure.terra",
+    StoreKey = {terra_backend_once_failure, terra_once, "Fail"},
+    erlang:erase(StoreKey),
+    Result = transpiler:run_file(Path, "", OutDir),
+    Cache = erlang:get(StoreKey),
+    expect("failed once-only calls are retryable",
+           is_runtime_reason(Result, badarith) andalso Cache == undefined).
+
+test_once_reentrancy(OutDir) ->
+    Path = "tests/programs/backend_once_reentrant.terra",
+    StoreKey = {terra_backend_once_reentrant, terra_once, "Reenter"},
+    erlang:erase(StoreKey),
+    Result = transpiler:run_file(Path, "", OutDir),
+    Cache = erlang:get(StoreKey),
+    expect("reentrant once-only calls fail explicitly",
+           is_runtime_reason(Result, {terra_once_reentrant, "Reenter"}) andalso
+           Cache == undefined).
+
+is_runtime_reason({error, {runtime_error, error, Reason, _Stacktrace}}, Reason) -> true;
+is_runtime_reason(_Result, _Reason) -> false.
 
 expect(Name, true) ->
     io:format("ok - ~s~n", [Name]),

@@ -83,6 +83,12 @@ generate_module(Module, #{functions := Functions}) ->
      runtime_helpers()].
 
 generate_function(Function) ->
+    case lists:usort(tail_calls(maps:get(statements, Function, []))) of
+        [] -> generate_regular_function(Function);
+        TailCalls -> generate_tail_function(Function, TailCalls)
+    end.
+
+generate_regular_function(Function) ->
     Name = maps:get(name, Function),
     Params = maps:get(params, Function),
     {ParamNames, Env, Counter} = bind_parameters(Params, 1, [], #{}),
@@ -96,6 +102,47 @@ generate_function(Function) ->
      indent(1), "catch\n",
      indent(2), "throw:{terra_return, TerraReturnValue} -> TerraReturnValue\n",
      indent(1), "end.\n\n"].
+
+generate_tail_function(Function, TailCalls) ->
+    Name = maps:get(name, Function),
+    Params = maps:get(params, Function),
+    {ParamNames, Env, Counter} = bind_parameters(Params, 1, [], #{}),
+    StepName = tail_step_name(Name),
+    Dispatch = [tail_dispatch_clause(Target, Arity) || {Target, Arity} <- TailCalls] ++
+               [["{terra_return, TerraReturnValue} -> TerraReturnValue"]],
+    {Body, _FinalEnv, _FinalCounter} =
+        generate_statements(maps:get(statements, Function, []), Env, Counter, 2, Name),
+    Default = default_value(maps:get(return_types, Function)),
+    Expressions = Body ++ [[indent(2), Default]],
+    [function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",
+     indent(1), "case ", StepName, "(", lists:join(", ", ParamNames), ") of\n",
+     indent(2), lists:join([";\n", indent(2)], Dispatch), "\n",
+     indent(1), "end.\n\n",
+     StepName, "(", lists:join(", ", ParamNames), ") ->\n",
+     indent(1), "try\n",
+     join_expressions(Expressions), "\n",
+     indent(1), "catch\n",
+     indent(2), "throw:{terra_return, TerraReturnValue} -> ",
+     "{terra_return, TerraReturnValue};\n",
+     indent(2), "throw:{terra_tail_call, TerraTarget, TerraArgs} -> ",
+     "{terra_tail_call, TerraTarget, TerraArgs}\n",
+     indent(1), "end.\n\n"].
+
+tail_dispatch_clause(Target, Arity) ->
+    Args = ["TerraTailArg" ++ integer_to_list(Index)
+            || Index <- lists:seq(1, Arity)],
+    ["{terra_tail_call, ", io_lib:format("~p", [Target]), ", [",
+     lists:join(", ", Args), "]} -> ", function_name(Target), "(",
+     lists:join(", ", Args), ")"].
+
+tail_calls(#{kind := return, values := [{call, Name, Args}]}) when is_list(Name) ->
+    [{Name, length(Args)}];
+tail_calls(Value) when is_map(Value) ->
+    lists:append([tail_calls(Child) || Child <- maps:values(Value)]);
+tail_calls(Value) when is_list(Value) ->
+    lists:append([tail_calls(Child) || Child <- Value]);
+tail_calls(_Value) ->
+    [].
 
 bind_parameters([], Counter, Names, Env) ->
     {lists:reverse(Names), Env, Counter};
@@ -145,6 +192,12 @@ generate_statement(#{kind := call, name := Name, args := Args,
                         ", fun() -> ", Call, " end)"];
                repeated -> Call
            end,
+    {[indent(Level), Code], Env, Counter};
+generate_statement(#{kind := return, values := [{call, Name, Args}]}, Env, Counter,
+                   Level, _FunctionName) when is_list(Name) ->
+    TailArgs = [expression(Arg, Env) || Arg <- Args],
+    Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
+            lists:join(", ", TailArgs), "]})"],
     {[indent(Level), Code], Env, Counter};
 generate_statement(#{kind := return, values := Values}, Env, Counter,
                    Level, _FunctionName) ->
@@ -349,6 +402,8 @@ operator(or_or) -> "orelse".
 
 function_name(Name) -> "terra_fn_" ++ sanitize_lower(Name).
 
+tail_step_name(Name) -> function_name(Name) ++ "_tail_step".
+
 variable_name(Name, Counter) ->
     "Terra_" ++ sanitize_title(Name) ++ "_" ++ integer_to_list(Counter).
 
@@ -389,7 +444,18 @@ runtime_helpers() ->
     "terra_once(Key, Fun) ->\n"
     "    StoreKey = {?MODULE, terra_once, Key},\n"
     "    case erlang:get(StoreKey) of\n"
-    "        undefined -> Value = Fun(), erlang:put(StoreKey, {done, Value}), Value;\n"
+    "        undefined ->\n"
+    "            erlang:put(StoreKey, running),\n"
+    "            try\n"
+    "                Value = Fun(),\n"
+    "                erlang:put(StoreKey, {done, Value}),\n"
+    "                Value\n"
+    "            catch\n"
+    "                Class:Reason:Stacktrace ->\n"
+    "                    erlang:erase(StoreKey),\n"
+    "                    erlang:raise(Class, Reason, Stacktrace)\n"
+    "            end;\n"
+    "        running -> erlang:error({terra_once_reentrant, Key});\n"
     "        {done, Value} -> Value\n"
     "    end.\n\n"
     "terra_range(Limit) when Limit =< 0 -> [];\n"

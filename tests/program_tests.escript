@@ -82,6 +82,9 @@ main(_Args) ->
               fun(Result) -> element(1, Result) =:= ok end},
              {"invalid numeric conversion", "tests/programs/numeric_bad_conversion.terra",
               fun expect_invalid_numeric_conversion/1},
+             {"once-only calls require zero arguments",
+              "tests/programs/once_requires_zero_args.terra",
+              fun expect_once_requires_zero_args/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -277,6 +280,13 @@ expect_invalid_numeric_conversion(
   {error, {in_function, "Main", {invalid_numeric_conversion, string, int}}}) ->
     true;
 expect_invalid_numeric_conversion(_) ->
+    false.
+
+expect_once_requires_zero_args(
+  {error, {in_function, "Main",
+           {argument_type_mismatch, "NeedsValue", [int], []}}}) ->
+    true;
+expect_once_requires_zero_args(_) ->
     false.
 
 expect_complete_ast({ok, Program}) ->
