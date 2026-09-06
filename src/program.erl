@@ -30,6 +30,7 @@ pass_pipeline() ->
     [{parsing, fun parsing_pass/1},
      {name_resolution, fun name_resolution_pass/1},
      {type_checking, fun type_checking_pass/1},
+     {unreachable_code, fun unreachable_code_pass/1},
      {definite_return, fun definite_return_pass/1},
      {lowering, fun lowering_pass/1}].
 
@@ -71,6 +72,14 @@ type_checking_pass(#{functions := Functions, signatures := Signatures,
         Error -> Error
     end.
 
+unreachable_code_pass(#{program := #{functions := Functions}} = Context) ->
+    case first_unreachable_statement(Functions) of
+        none -> {ok, Context};
+        #{function := Name, statement := Statement} ->
+            {error, {in_function, Name,
+                     {unreachable_statement, maps:get(kind, Statement)}}}
+    end.
+
 definite_return_pass(#{program := #{functions := Functions}} = Context) ->
     case first_missing_return(Functions) of
         none -> {ok, Context};
@@ -99,17 +108,39 @@ parse_functions(Other, _Acc) ->
 parse_function(Name, Types, Tokens, Acc) ->
     case parse_parameters(Tokens, []) of
         {ok, Params, [{lbrace, "{"} | BodyTokens]} ->
-            case take_body(BodyTokens, 1, []) of
-                {ok, Body, Rest} ->
-                    Function = #{kind => function, name => Name, params => Params,
-                                 return_type => return_type(Types),
-                                 return_types => Types, body => Body},
-                    parse_functions(Rest, [Function | Acc]);
-                Error -> Error
+            case duplicate_param_name(Params) of
+                none ->
+                    case take_body(BodyTokens, 1, []) of
+                        {ok, Body, Rest} ->
+                            Function = #{kind => function, name => Name, params => Params,
+                                         return_type => return_type(Types),
+                                         return_types => Types, body => Body},
+                            parse_functions(Rest, [Function | Acc]);
+                        Error -> Error
+                    end;
+                Duplicate ->
+                    {error, {duplicate_variable, Duplicate}}
             end;
         {ok, _Params, Other} -> {error, {expected_function_body, Other}};
         Error -> Error
     end.
+
+duplicate_param_name(Params) ->
+    duplicate_name([#{name => maps:get(name, Param)} || Param <- Params], []).
+
+duplicate_binding_name(Bindings) ->
+    duplicate_name([#{name => Name} || {_Type, Name} <- Bindings], []).
+
+validate_binding_names(Bindings) ->
+    case duplicate_binding_name(Bindings) of
+        none -> ok;
+        Name -> {error, {duplicate_variable, Name}}
+    end.
+
+validate_loop_binding_name("it") ->
+    {error, {invalid_shadowing, "it"}};
+validate_loop_binding_name(_Name) ->
+    ok.
 
 parse_return_types([{keyword, Type} | Rest]) ->
     checked_type(Type, [Type], Rest, unknown_return_type);
@@ -212,6 +243,62 @@ env_find(Name, [Scope | Rest]) ->
     case maps:find(Name, Scope) of
         {ok, Type} -> {ok, Type};
         error -> env_find(Name, Rest)
+    end.
+
+first_unreachable_statement([]) ->
+    none;
+first_unreachable_statement([#{name := Name, statements := Statements} | Rest]) ->
+    case first_unreachable_in_statements(Statements) of
+        none -> first_unreachable_statement(Rest);
+        Statement -> #{function => Name, statement => Statement}
+    end.
+
+first_unreachable_in_statements(Statements) ->
+    first_unreachable_in_statements(Statements, false).
+
+first_unreachable_in_statements([], _PreviousReturned) ->
+    none;
+first_unreachable_in_statements([Statement | _Rest], true) ->
+    Statement;
+first_unreachable_in_statements([Statement | Rest], false) ->
+    case first_unreachable_in_statement(Statement) of
+        none ->
+            first_unreachable_in_statements(Rest,
+                                            statement_definitely_returns(Statement));
+        Unreachable ->
+            Unreachable
+    end.
+
+first_unreachable_in_statement(#{kind := 'if', branches := Branches,
+                                 else_branch := Else}) ->
+    Groups = [maps:get(statements, Branch) || Branch <- Branches] ++
+        case Else of
+            none -> [];
+            _ -> [Else]
+        end,
+    first_unreachable_in_groups(Groups);
+first_unreachable_in_statement(#{kind := unless, statements := Statements,
+                                 else_branch := Else}) ->
+    Groups = [Statements] ++
+        case Else of
+            none -> [];
+            _ -> [Else]
+        end,
+    first_unreachable_in_groups(Groups);
+first_unreachable_in_statement(#{kind := switch, cases := Cases}) ->
+    first_unreachable_in_groups([maps:get(statements, Case) || Case <- Cases]);
+first_unreachable_in_statement(#{kind := Kind, statements := Statements})
+  when Kind == for_each; Kind == 'for'; Kind == while; Kind == do_while ->
+    first_unreachable_in_statements(Statements);
+first_unreachable_in_statement(_Statement) ->
+    none.
+
+first_unreachable_in_groups([]) ->
+    none;
+first_unreachable_in_groups([Statements | Rest]) ->
+    case first_unreachable_in_statements(Statements) of
+        none -> first_unreachable_in_groups(Rest);
+        Statement -> Statement
     end.
 
 first_missing_return([]) ->
@@ -349,22 +436,26 @@ parse_call_statement(Name, Tokens, F, Sigs, Env, Acc) ->
     end.
 
 parse_for_each([{id, Binding}, {keyword, 'in'} | Rest], F, Sigs, Env, Acc) ->
-    case parse_expr(Rest, Sigs, Env) of
-        {ok, Iterable, [{lbrace, "{"} | BodyStart]} ->
-            case single_type(Iterable, Sigs, Env) of
-                {ok, IterableType} ->
-                    case iterable_type(IterableType) of
-                        true ->
-                            LoopEnv = env_put("it", int,
-                                              env_put(Binding, var, env_child(Env))),
-                            parse_loop_body(for_each, BodyStart, Rest, F, Sigs, Env,
-                                            LoopEnv, Acc,
-                                            #{binding => Binding, iterable => Iterable});
-                        false -> {error, {expected_iterable, IterableType, Iterable}}
+    case validate_loop_binding_name(Binding) of
+        ok ->
+            case parse_expr(Rest, Sigs, Env) of
+                {ok, Iterable, [{lbrace, "{"} | BodyStart]} ->
+                    case single_type(Iterable, Sigs, Env) of
+                        {ok, IterableType} ->
+                            case iterable_type(IterableType) of
+                                true ->
+                                    LoopEnv = env_put("it", int,
+                                                      env_put(Binding, var, env_child(Env))),
+                                    parse_loop_body(for_each, BodyStart, Rest, F, Sigs, Env,
+                                                    LoopEnv, Acc,
+                                                    #{binding => Binding, iterable => Iterable});
+                                false -> {error, {expected_iterable, IterableType, Iterable}}
+                            end;
+                        Error -> Error
                     end;
+                {ok, _Iterable, Other} -> {error, {expected_loop_body, Other}};
                 Error -> Error
             end;
-        {ok, _Iterable, Other} -> {error, {expected_loop_body, Other}};
         Error -> Error
     end;
 parse_for_each(Other, _F, _Sigs, _Env, _Acc) ->
@@ -520,24 +611,26 @@ parse_cases([{keyword, 'case'}, {atomprefix, ":"}, {id, Name}, {atomprefix, ":"}
             SubjectType, F, Sigs, Env, Acc, HasDefault) ->
     Pattern = {atom, list_to_atom(Name)},
     case types_compatible(SubjectType, atom) of
-        true -> parse_case_body(Pattern, BodyTokens, SubjectType,
-                                F, Sigs, Env, Acc, HasDefault);
+        true -> parse_case_body_if_unique(Pattern, BodyTokens, SubjectType,
+                                          F, Sigs, Env, Acc, HasDefault);
         false -> {error, {case_type_mismatch, SubjectType, atom}}
     end;
 parse_cases([{keyword, 'case'}, {atomprefix, ":"} | BodyTokens], SubjectType,
             F, Sigs, Env, Acc, false) ->
-    parse_case_body(default, BodyTokens, SubjectType, F, Sigs, Env, Acc, true);
+    parse_case_body_if_unique(default, BodyTokens, SubjectType, F, Sigs, Env,
+                              Acc, true);
 parse_cases([{keyword, 'case'}, {atomprefix, ":"} | _BodyTokens], _SubjectType,
             _F, _Sigs, _Env, _Acc, true) ->
-    {error, duplicate_default_case};
+    {error, {duplicate_case, default}};
 parse_cases([{keyword, 'case'} | Rest], SubjectType, F, Sigs, Env, Acc, HasDefault) ->
     case parse_expr(Rest, Sigs, Env) of
         {ok, Pattern, [{atomprefix, ":"} | BodyTokens]} ->
             case single_type(Pattern, Sigs, Env) of
                 {ok, PatternType} ->
                     case types_compatible(SubjectType, PatternType) of
-                        true -> parse_case_body(Pattern, BodyTokens, SubjectType,
-                                                F, Sigs, Env, Acc, HasDefault);
+                        true -> parse_case_body_if_unique(Pattern, BodyTokens,
+                                                          SubjectType, F, Sigs,
+                                                          Env, Acc, HasDefault);
                         false ->
                             {error, {case_type_mismatch, SubjectType, PatternType}}
                     end;
@@ -548,6 +641,15 @@ parse_cases([{keyword, 'case'} | Rest], SubjectType, F, Sigs, Env, Acc, HasDefau
     end;
 parse_cases(Other, _SubjectType, _F, _Sigs, _Env, _Acc, _HasDefault) ->
     {error, {expected_case, Other}}.
+
+parse_case_body_if_unique(Pattern, BodyTokens, SubjectType, F, Sigs, Env, Acc,
+                          HasDefault) ->
+    case lists:any(fun(Case) -> maps:get(pattern, Case) == Pattern end, Acc) of
+        true -> {error, {duplicate_case, Pattern}};
+        false ->
+            parse_case_body(Pattern, BodyTokens, SubjectType, F, Sigs, Env, Acc,
+                            HasDefault)
+    end.
 
 parse_case_body(Pattern, Tokens, SubjectType, F, Sigs, Env, Acc, HasDefault) ->
     {Body, Rest} = take_case_body(Tokens, 0, []),
@@ -584,9 +686,13 @@ parse_bindings([{keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
     parse_bindings(Rest, [{Type, Name} | Acc]);
 parse_bindings([{keyword, Type}, {id, Name} | Rest], Acc) ->
     Bindings = lists:reverse([{Type, Name} | Acc]),
-    case lists:all(fun({T, _}) -> is_type(T) end, Bindings) of
-        true -> {ok, Bindings, Rest};
-        false -> {error, unknown_variable_type}
+    case validate_binding_names(Bindings) of
+        ok ->
+            case lists:all(fun({T, _}) -> is_type(T) end, Bindings) of
+                true -> {ok, Bindings, Rest};
+                false -> {error, unknown_variable_type}
+            end;
+        Error -> Error
     end;
 parse_bindings(Other, _Acc) ->
     {error, {expected_multi_binding, Other}}.
@@ -680,7 +786,11 @@ parse_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, 
 parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
     parse_parenthesized_bindings(Rest, [{Type, Name} | Acc]);
 parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
-    {ok, lists:reverse([{Type, Name} | Acc]), Rest};
+    Bindings = lists:reverse([{Type, Name} | Acc]),
+    case validate_binding_names(Bindings) of
+        ok -> {ok, Bindings, Rest};
+        Error -> Error
+    end;
 parse_parenthesized_bindings(Other, _Acc) ->
     {error, {expected_destructure_binding, Other}}.
 

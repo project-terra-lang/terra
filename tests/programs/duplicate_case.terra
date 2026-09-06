@@ -1,0 +1,11 @@
+function Number Main(String Args) {
+    if 1 == {
+        case 1:
+            stdout(1);
+        case 1:
+            stdout(2);
+        case:
+            stdout(0);
+    }
+    return 0;
+}

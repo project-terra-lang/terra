@@ -63,6 +63,18 @@ main(_Args) ->
               fun expect_missing_return/1},
              {"partial branch return", "tests/programs/partial_branch_return.terra",
               fun expect_partial_branch_return/1},
+             {"unreachable after return", "tests/programs/unreachable_after_return.terra",
+              fun expect_unreachable_after_return/1},
+             {"duplicate parameter", "tests/programs/duplicate_param.terra",
+              fun(Result) -> Result =:= {error, {duplicate_variable, "Args"}} end},
+             {"duplicate multi binding", "tests/programs/duplicate_multi_binding.terra",
+              fun expect_duplicate_binding/1},
+             {"duplicate destructure binding", "tests/programs/duplicate_destructure_binding.terra",
+              fun expect_duplicate_binding/1},
+             {"duplicate case", "tests/programs/duplicate_case.terra",
+              fun expect_duplicate_case/1},
+             {"invalid loop shadowing", "tests/programs/invalid_loop_shadowing.terra",
+              fun expect_invalid_loop_shadowing/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -199,7 +211,8 @@ expect_empty_return(_) ->
     false.
 
 expect_passes({ok, Program}) ->
-    Expected = [parsing, name_resolution, type_checking, definite_return, lowering],
+    Expected = [parsing, name_resolution, type_checking, unreachable_code,
+                definite_return, lowering],
     program:passes() == Expected andalso maps:get(passes, Program) == Expected;
 expect_passes(_) ->
     false.
@@ -212,6 +225,29 @@ expect_missing_return(_) ->
 expect_partial_branch_return({error, {in_function, "Main", {missing_return, [number]}}}) ->
     true;
 expect_partial_branch_return(_) ->
+    false.
+
+expect_unreachable_after_return({error, {in_function, "Main",
+                                         {unreachable_statement, call}}}) ->
+    true;
+expect_unreachable_after_return(_) ->
+    false.
+
+expect_duplicate_binding({error, {in_function, "Main",
+                                  {duplicate_variable, "value"}}}) ->
+    true;
+expect_duplicate_binding(_) ->
+    false.
+
+expect_duplicate_case({error, {in_function, "Main", {duplicate_case, {int, 1}}}}) ->
+    true;
+expect_duplicate_case(_) ->
+    false.
+
+expect_invalid_loop_shadowing({error, {in_function, "Main",
+                                       {invalid_shadowing, "it"}}}) ->
+    true;
+expect_invalid_loop_shadowing(_) ->
     false.
 
 expect_complete_ast({ok, Program}) ->

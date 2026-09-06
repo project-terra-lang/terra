@@ -21,7 +21,7 @@ The entry point receives command-line arguments as `String Args` and returns a
 The current compiler pipeline is split into explicit passes:
 
 ```text
-parsing -> name_resolution -> type_checking -> definite_return -> lowering -> codegen
+parsing -> name_resolution -> type_checking -> unreachable_code -> definite_return -> lowering -> codegen
 ```
 
 `program:parse_file/1` runs the frontend passes and records them in the
@@ -128,6 +128,10 @@ codegen.
 Variable names may be shadowed by later declarations. References resolve to the
 newest visible binding in the current parser environment.
 
+Duplicate names inside a single parameter list, multiple-return binding, or
+destructuring binding are rejected. Loop bindings may not use `it`, because
+loops already provide `it` as an implicit counter.
+
 Function bodies are lexical scopes. Control-flow bodies create child scopes:
 variables declared inside `if`, `elseif`, `else`, `unless`, switch cases, and
 loop bodies are visible inside that block and disappear after the closing brace.
@@ -213,6 +217,8 @@ Every declared function must definitely return on every path. A trailing
 fall-through is rejected even though the backend can generate default Erlang
 values internally.
 
+Statements after a guaranteed return are rejected as unreachable code.
+
 ### Console Output
 
 `stdout(...)` is the built-in console output intrinsic.
@@ -261,7 +267,7 @@ if status == {
 ```
 
 Case patterns must be type-compatible with the switch subject. The default case
-must be last.
+must be last. Duplicate case patterns are rejected.
 
 ### Loops
 

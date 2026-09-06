@@ -14,6 +14,23 @@ format(duplicate_entry_point) ->
     {duplicate_entry_point,
      "More than one Main function was defined.",
      "Keep exactly one function Number Main(String Args)."};
+format({duplicate_function, Name}) ->
+    {duplicate_function,
+     io_lib:format("Function ~s is defined more than once.", [Name]),
+     "Keep one function with that name, or rename one of them."};
+format({duplicate_variable, Name}) ->
+    {duplicate_variable,
+     io_lib:format("Variable ~s is bound more than once in the same binding.",
+                   [Name]),
+     "Use each variable name once in a parameter, destructuring, or multi-binding list."};
+format({invalid_shadowing, Name}) ->
+    {invalid_shadowing,
+     io_lib:format("Variable ~s cannot shadow an implicit binding here.", [Name]),
+     "Choose a different name so the implicit binding remains unambiguous."};
+format({duplicate_case, Pattern}) ->
+    {duplicate_case,
+     io_lib:format("Switch case ~s is already handled.", [pattern_name(Pattern)]),
+     "Remove the duplicate case or combine its body with the first matching case."};
 format({invalid_entry_point_signature, Signature}) ->
     {invalid_entry_point_signature,
      "Main has the wrong return type, parameter, or parameter name.",
@@ -60,6 +77,11 @@ format({missing_return, ReturnTypes}) ->
      io_lib:format("This function must return ~s on every path.",
                    [type_list(ReturnTypes)]),
      "Add an explicit return, or make every if/unless/switch branch return."};
+format({unreachable_statement, Kind}) ->
+    {unreachable_statement,
+     io_lib:format("A ~s statement appears after a guaranteed return.",
+                   [statement_name(Kind)]),
+     "Remove the unreachable statement or move it before the return."};
 format({argument_type_mismatch, Name, Expected, Actual}) ->
     {argument_type_mismatch,
      io_lib:format("Call to ~s expects ~s, but received ~s.",
@@ -238,6 +260,14 @@ locate_reason(Lines, Start, End, default_case_must_be_last) ->
     locate_substring(Lines, Start, End, "case:", first);
 locate_reason(Lines, Start, End, duplicate_default_case) ->
     locate_substring(Lines, Start, End, "case:", last);
+locate_reason(Lines, Start, End, {duplicate_case, default}) ->
+    locate_substring(Lines, Start, End, "case:", last);
+locate_reason(Lines, Start, End, {duplicate_case, _Pattern}) ->
+    locate_substring(Lines, Start, End, "case ", last);
+locate_reason(Lines, Start, End, {duplicate_variable, Name}) ->
+    locate_substring(Lines, Start, End, Name, last);
+locate_reason(Lines, Start, End, {invalid_shadowing, Name}) ->
+    locate_substring(Lines, Start, End, Name, first);
 locate_reason(Lines, Start, End, {return_type_mismatch, _Expected, _Actual}) ->
     case locate_after(Lines, Start, End, "return ") of
         none -> locate_after(Lines, Start, End, " = ");
@@ -419,6 +449,15 @@ frame_line(_Lines, _Number, _Width, _Marker) -> [].
 name(Value) when is_atom(Value) -> atom_to_list(Value);
 name(Value) -> Value.
 
+pattern_name(default) -> "default";
+pattern_name({atom, Value}) -> ":" ++ atom_to_list(Value);
+pattern_name({int, Value}) -> integer_to_list(Value);
+pattern_name({sint, Value}) -> integer_to_list(Value);
+pattern_name({float, Value}) -> io_lib:format("~p", [Value]);
+pattern_name({string, Value}) -> binary_to_list(Value);
+pattern_name({bool, Value}) -> atom_to_list(Value);
+pattern_name(Pattern) -> io_lib:format("~p", [Pattern]).
+
 type_list(Types) ->
     ["(", lists:join(", ", [type_name(Type) || Type <- Types]), ")"].
 
@@ -434,3 +473,9 @@ type_name(tuple) -> "Tuple";
 type_name(string) -> "String";
 type_name(var) -> "Var";
 type_name(Type) -> io_lib:format("~p", [Type]).
+
+statement_name('if') -> "if";
+statement_name('for') -> "for";
+statement_name(for_each) -> "for_each";
+statement_name(do_while) -> "do_while";
+statement_name(Kind) -> io_lib:format("~p", [Kind]).

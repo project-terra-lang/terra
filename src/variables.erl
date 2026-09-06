@@ -359,9 +359,14 @@ parse_bindings([{rparen, ")"} | Rest], Acc) ->
 parse_bindings([{keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
     parse_binding(Type, Name, Rest, Acc);
 parse_bindings([{keyword, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
-    case is_type(Type) of
-        true -> {ok, lists:reverse([{Type, Name} | Acc]), Rest};
-        false -> {error, {unknown_variable_type, Type}}
+    Bindings = lists:reverse([{Type, Name} | Acc]),
+    case validate_binding_names(Bindings) of
+        ok ->
+            case is_type(Type) of
+                true -> {ok, Bindings, Rest};
+                false -> {error, {unknown_variable_type, Type}}
+            end;
+        Error -> Error
     end;
 parse_bindings(Other, _Acc) ->
     {error, {expected_destructure_binding, Other}}.
@@ -370,6 +375,17 @@ parse_binding(Type, Name, Rest, Acc) ->
     case is_type(Type) of
         true -> parse_bindings(Rest, [{Type, Name} | Acc]);
         false -> {error, {unknown_variable_type, Type}}
+    end.
+
+validate_binding_names(Bindings) ->
+    validate_binding_names(Bindings, []).
+
+validate_binding_names([], _Seen) ->
+    ok;
+validate_binding_names([{_Type, Name} | Rest], Seen) ->
+    case lists:member(Name, Seen) of
+        true -> {error, {duplicate_variable, Name}};
+        false -> validate_binding_names(Rest, [Name | Seen])
     end.
 
 bind_destructure(Scope, Bindings, Value, Env, Remaining) ->

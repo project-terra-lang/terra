@@ -27,8 +27,8 @@ compiler.
       explicit compiler passes
 - [X] Add lexical block scopes and verify that branch/loop bindings never leak
 - [X] Add definite-return analysis for every declared function return type
-- [ ] Detect unreachable statements after unconditional returns
-- [ ] Detect duplicate variables, duplicate cases, and invalid shadowing uniformly
+- [X] Detect unreachable statements after unconditional returns
+- [X] Detect duplicate variables, duplicate cases, and invalid shadowing uniformly
 - [ ] Complete expression precedence, unary operators, boolean operators, and
       short-circuit evaluation
 - [ ] Define integer overflow, numeric conversion, division, and comparison rules

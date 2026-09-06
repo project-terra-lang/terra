@@ -1,0 +1,4 @@
+function Number Main(String Args) {
+    return 0;
+    stdout("never");
+}
