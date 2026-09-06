@@ -23,10 +23,28 @@ format({duplicate_variable, Name}) ->
      io_lib:format("Variable ~s is bound more than once in the same binding.",
                    [Name]),
      "Use each variable name once in a parameter, destructuring, or multi-binding list."};
+format({duplicate_global, Name}) ->
+    {duplicate_global,
+     io_lib:format("Global variable ~s is declared more than once.", [Name]),
+     "Keep one module-wide declaration for each global name."};
 format({invalid_shadowing, Name}) ->
     {invalid_shadowing,
      io_lib:format("Variable ~s cannot shadow an implicit binding here.", [Name]),
      "Choose a different name so the implicit binding remains unambiguous."};
+format({invalid_atomic_type, Type}) ->
+    {invalid_atomic_type,
+     io_lib:format("Atomic storage requires Int or SInt, but received ~s.",
+                   [type_name(Type)]),
+     "Use an integer atomic binding or choose an ordinary immutable binding."};
+format({invalid_storage_combination, Scope, Modifier}) ->
+    {invalid_storage_combination,
+     io_lib:format("The ~s scope cannot be combined with ~s storage.",
+                   [name(Scope), name(Modifier)]),
+     "Use a local modifier or a plain global/const/atomic declaration."};
+format({global_initializer_not_closed, Name}) ->
+    {global_initializer_not_closed,
+     io_lib:format("Global ~s depends on a lexical variable.", [Name]),
+     "Use a closed initializer that does not reference parameters or local bindings."};
 format({duplicate_case, Pattern}) ->
     {duplicate_case,
      io_lib:format("Switch case ~s is already handled.", [pattern_name(Pattern)]),

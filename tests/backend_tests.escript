@@ -9,6 +9,7 @@ main(_Args) ->
                test_tail_recursion(OutDir),
                test_once_semantics(OutDir), test_once_failure(OutDir),
                test_once_reentrancy(OutDir),
+               test_storage_semantics(OutDir), test_computed_deferred(OutDir),
                test_showcase_compile(OutDir)],
     case lists:member(fail, Results) of
         true ->
@@ -188,6 +189,65 @@ test_once_reentrancy(OutDir) ->
 
 is_runtime_reason({error, {runtime_error, error, Reason, _Stacktrace}}, Reason) -> true;
 is_runtime_reason(_Result, _Reason) -> false.
+
+test_storage_semantics(OutDir) ->
+    Path = "tests/programs/backend_storage_semantics.terra",
+    Module = terra_backend_storage_semantics,
+    GlobalKey = {Module, terra_global, "shared"},
+    AtomicKey = {Module, terra_global, {atomic, "global_counter"}},
+    MultiKey = {Module, terra_global, {multi, ["first", "second"]}},
+    ThreadKey = {Module, terra_thread_local, {"Main", "session", 3}},
+    persistent_term:erase(GlobalKey),
+    persistent_term:erase(AtomicKey),
+    persistent_term:erase(MultiKey),
+    erlang:erase(ThreadKey),
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, Module, Source}, {ok, Module, 102, _BeamPath, _ErlangPath}} ->
+            ParentThread = erlang:get(ThreadKey),
+            {done, GlobalAtomic} = persistent_term:get(AtomicKey),
+            Parent = self(),
+            spawn(fun() ->
+                Result = apply(Module, main, [<<>>]),
+                Parent ! {storage_child, Result, erlang:get(ThreadKey),
+                          persistent_term:get(AtomicKey)}
+            end),
+            Child = receive
+                {storage_child, ChildValue, ChildThread, ChildAtomic} ->
+                    {ChildValue, ChildThread, ChildAtomic}
+            after 5000 -> timeout
+            end,
+            Binary = iolist_to_binary(Source),
+            Valid = persistent_term:get(GlobalKey) == {done, 11} andalso
+                    atomics:get(GlobalAtomic, 1) == 4 andalso
+                    persistent_term:get(MultiKey) == {done, {5, 6}} andalso
+                    ParentThread == {done, 22} andalso
+                    Child == {102, {done, 22}, {done, GlobalAtomic}} andalso
+                    contains(Binary, <<"Terra_total_8 = fun() ->">>) andalso
+                    contains(Binary, <<"Terra_total_8() + Terra_total_8()">>),
+            persistent_term:erase(GlobalKey),
+            persistent_term:erase(AtomicKey),
+            persistent_term:erase(MultiKey),
+            erlang:erase(ThreadKey),
+            expect("global, atomic, thread-local, and computed storage", Valid);
+        Other ->
+            persistent_term:erase(GlobalKey),
+            persistent_term:erase(AtomicKey),
+            persistent_term:erase(MultiKey),
+            erlang:erase(ThreadKey),
+            io:format("not ok - global, atomic, thread-local, and computed storage~n"
+                      "  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_computed_deferred(OutDir) ->
+    Path = "tests/programs/backend_computed_deferred.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_backend_computed_deferred, 7, _BeamPath, _ErlangPath} ->
+            expect("computed initializer is deferred", true);
+        Other ->
+            io:format("not ok - computed initializer is deferred~n  got: ~p~n", [Other]),
+            fail
+    end.
 
 expect(Name, true) ->
     io:format("ok - ~s~n", [Name]),

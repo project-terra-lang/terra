@@ -1,0 +1,4 @@
+function Number Main(String Args) {
+    local computed Float unused = 1 / 0;
+    return 7;
+}

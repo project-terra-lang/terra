@@ -42,7 +42,10 @@ cases() ->
       fun(Result) -> Result =:= {error, {not_compile_time_constant, "base"}} end},
      {"concurrency", "tests/variables/concurrency.terra", fun expect_concurrency/1},
      {"invalid atomic", "tests/variables/invalid_atomic.terra",
-      fun(Result) -> Result =:= {error, {invalid_atomic_type, string}} end}].
+      fun(Result) ->
+          Result =:= {error, {invalid_atomic_type, string}} orelse
+          Result =:= {error, {in_function, "Main", {invalid_atomic_type, string}}}
+      end}].
 
 run_case({Name, Path, Expect}) ->
     Result = parse_main_variables(Path),

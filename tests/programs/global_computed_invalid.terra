@@ -1,0 +1,4 @@
+function Number Main(String Args) {
+    global computed Int invalid = 1 + 1;
+    return 0;
+}

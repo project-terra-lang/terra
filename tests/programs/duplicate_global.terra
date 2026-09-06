@@ -1,0 +1,9 @@
+function Number First() {
+    global Int shared = 1;
+    return shared;
+}
+
+function Number Main(String Args) {
+    global Int shared = 2;
+    return shared;
+}

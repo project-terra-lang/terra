@@ -85,6 +85,15 @@ main(_Args) ->
              {"once-only calls require zero arguments",
               "tests/programs/once_requires_zero_args.terra",
               fun expect_once_requires_zero_args/1},
+             {"global initializer is closed", "tests/programs/global_captures_local.terra",
+              fun expect_global_captures_local/1},
+             {"invalid global computed storage",
+              "tests/programs/global_computed_invalid.terra",
+              fun expect_global_computed_invalid/1},
+             {"invalid atomic Number storage", "tests/programs/atomic_number_invalid.terra",
+              fun expect_atomic_number_invalid/1},
+             {"duplicate global storage", "tests/programs/duplicate_global.terra",
+              fun(Result) -> Result =:= {error, {duplicate_global, "shared"}} end},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -288,6 +297,23 @@ expect_once_requires_zero_args(
     true;
 expect_once_requires_zero_args(_) ->
     false.
+
+expect_global_captures_local(
+  {error, {in_function, "Main", {global_initializer_not_closed, "captured"}}}) ->
+    true;
+expect_global_captures_local(_) ->
+    false.
+
+expect_global_computed_invalid(
+  {error, {in_function, "Main",
+           {invalid_storage_combination, global, computed}}}) ->
+    true;
+expect_global_computed_invalid(_) ->
+    false.
+
+expect_atomic_number_invalid(
+  {error, {in_function, "Main", {invalid_atomic_type, number}}}) -> true;
+expect_atomic_number_invalid(_) -> false.
 
 expect_complete_ast({ok, Program}) ->
     not has_raw_fallback(Program);

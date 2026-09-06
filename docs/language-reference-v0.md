@@ -168,9 +168,27 @@ local thread_local String session = "local";
 ```
 
 `const` declarations fold simple literal expressions and const references during
-parsing. `computed`, `atomic`, `thread_local`, `global`, and `temp` currently
-preserve metadata for later compiler stages unless explicitly supported by
-codegen.
+parsing. The remaining storage forms have runtime semantics:
+
+- `global` initializes successfully once per generated module and name, then
+  shares the immutable value across BEAM processes through `persistent_term`.
+  Its initializer must be closed: it cannot reference parameters or lexical
+  variables. Concurrent first access is serialized, and failed initialization
+  is retryable. Global names must be unique across the module.
+- `thread_local` initializes successfully once per declaration site and BEAM process.
+  Its process-dictionary value disappears when the process exits, and failed
+  initialization is retryable.
+- `atomic` accepts only `Int` or `SInt`. It stores the value in a one-cell BEAM
+  `atomics` reference and reads through `atomics:get/2`. A `global atomic`
+  declaration shares the cell module-wide; local and temporary atomic cells are
+  created for each function invocation.
+- `computed` creates a local getter and reevaluates its expression on every
+  reference. The expression is not evaluated when declared.
+- `temp` currently has function-local lifetime like `local`; it remains a
+  distinct AST scope for future optimization work.
+
+`global computed`, `global lazy`, and `global thread_local` are rejected because
+their storage/lifetime guarantees conflict.
 
 Variable names may be shadowed by later declarations. References resolve to the
 newest visible binding in the current parser environment.
@@ -432,5 +450,5 @@ mul_op          = "*" | "/" ;
 
 ## Current Limits
 
-Warnings and real `global`/`atomic`/`thread_local` runtime behavior are future
-work.
+Warnings are future work. `temp` has distinct syntax and AST metadata but still
+shares local function lifetime.

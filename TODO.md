@@ -34,7 +34,7 @@ compiler.
 - [X] Define integer overflow, numeric conversion, division, and comparison rules
 - [X] Make tail-recursive calls compile to real BEAM tail calls
 - [X] Define and implement exact semantics for `name;` once-only calls
-- [ ] Implement real semantics for `global`, `atomic`, `thread_local`, and
+- [X] Implement real semantics for `global`, `atomic`, `thread_local`, and
       `computed` instead of lowering them as ordinary locals
 - [ ] Add warnings separately from errors, including unused variables, unused
       parameters, shadowing, and ignored return values

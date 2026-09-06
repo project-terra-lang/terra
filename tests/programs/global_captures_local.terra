@@ -1,0 +1,4 @@
+function Number Main(String Args) {
+    global String captured = Args;
+    return 0;
+}

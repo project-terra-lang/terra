@@ -162,18 +162,47 @@ generate_statements([Statement | Rest], Env, Counter, Level, FunctionName) ->
     {[Code | Remaining], FinalEnv, FinalCounter}.
 
 generate_statement(#{kind := variable, name := Name, value := Value} = Statement,
-                   Env, Counter, Level, _FunctionName) ->
+                   Env, Counter, Level, FunctionName) ->
     ErlangName = variable_name(Name, Counter),
     ValueCode = expression(Value, Env),
     Eval = maps:get(eval, Statement, runtime),
-    case Eval of
-        lazy ->
+    Scope = maps:get(scope, Statement, local),
+    Concurrency = maps:get(concurrency, Statement, shared),
+    case {Scope, Eval, Concurrency} of
+        {_AnyScope, computed, _AnyConcurrency} ->
+            {[indent(Level), ErlangName, " = fun() -> ", ValueCode, " end"],
+             maps:put(Name, {computed, ErlangName}, Env), Counter + 1};
+        {global, _AnyEval, atomic} ->
+            {[indent(Level), ErlangName, " = terra_global_atomic(",
+              io_lib:format("~p", [Name]), ", fun() -> ", ValueCode, " end)"],
+             maps:put(Name, {atomic, ErlangName}, Env), Counter + 1};
+        {_AnyScope, _AnyEval, atomic} ->
+            {[indent(Level), ErlangName, " = terra_atomic(", ValueCode, ")"],
+             maps:put(Name, {atomic, ErlangName}, Env), Counter + 1};
+        {_AnyScope, _AnyEval, thread_local} ->
+            Key = {FunctionName, Name, Counter},
+            {[indent(Level), ErlangName, " = terra_thread_local(",
+              io_lib:format("~p", [Key]), ", fun() -> ", ValueCode, " end)"],
+             maps:put(Name, {direct, ErlangName}, Env), Counter + 1};
+        {global, _AnyEval, _AnyConcurrency} ->
+            {[indent(Level), ErlangName, " = terra_global(",
+              io_lib:format("~p", [Name]), ", fun() -> ", ValueCode, " end)"],
+             maps:put(Name, {direct, ErlangName}, Env), Counter + 1};
+        {_AnyScope, lazy, _AnyConcurrency} ->
             {[indent(Level), ErlangName, " = fun() -> ", ValueCode, " end"],
              maps:put(Name, {lazy, ErlangName}, Env), Counter + 1};
         _ ->
             {[indent(Level), ErlangName, " = ", ValueCode],
              maps:put(Name, {direct, ErlangName}, Env), Counter + 1}
     end;
+generate_statement(#{kind := multi_binding, scope := global, bindings := Bindings,
+                     value := Value},
+                   Env, Counter, Level, _FunctionName) ->
+    {Names, NewEnv, NextCounter} = bind_result_names(Bindings, Counter, Env, []),
+    Key = {multi, [maps:get(name, Binding) || Binding <- Bindings]},
+    {[indent(Level), "{", lists:join(", ", Names), "} = terra_global(",
+      io_lib:format("~p", [Key]), ", fun() -> ", expression(Value, Env), " end)"],
+     NewEnv, NextCounter};
 generate_statement(#{kind := multi_binding, bindings := Bindings, value := Value},
                    Env, Counter, Level, _FunctionName) ->
     {Names, NewEnv, NextCounter} = bind_result_names(Bindings, Counter, Env, []),
@@ -334,6 +363,8 @@ expression({var_ref, Name}, Env) ->
     case maps:find(Name, Env) of
         {ok, {direct, ErlangName}} -> ErlangName;
         {ok, {lazy, ErlangName}} -> [ErlangName, "()"];
+        {ok, {computed, ErlangName}} -> [ErlangName, "()"];
+        {ok, {atomic, ErlangName}} -> ["atomics:get(", ErlangName, ", 1)"];
         error -> throw({backend_error, {unknown_codegen_variable, Name}})
     end;
 expression({member, Value, Name}, Env) ->
@@ -441,6 +472,53 @@ runtime_helpers() ->
     "terra_to_sint(Value) when is_float(Value) -> trunc(Value).\n\n"
     "terra_to_float(Value) when is_float(Value) -> Value;\n"
     "terra_to_float(Value) when is_integer(Value) -> float(Value).\n\n"
+    "terra_global(Key, Fun) ->\n"
+    "    StoreKey = {?MODULE, terra_global, Key},\n"
+    "    case persistent_term:get(StoreKey, terra_missing) of\n"
+    "        {done, Value} -> Value;\n"
+    "        terra_missing -> terra_initialize_global(StoreKey, Fun)\n"
+    "    end.\n\n"
+    "terra_initialize_global(StoreKey, Fun) ->\n"
+    "    RunningKey = {?MODULE, terra_global_running, StoreKey},\n"
+    "    case erlang:get(RunningKey) of\n"
+    "        true -> erlang:error({terra_global_reentrant, StoreKey});\n"
+    "        undefined ->\n"
+    "            erlang:put(RunningKey, true),\n"
+    "            try\n"
+    "                global:trans({StoreKey, self()}, fun() ->\n"
+    "                    case persistent_term:get(StoreKey, terra_missing) of\n"
+    "                        {done, Existing} -> Existing;\n"
+    "                        terra_missing ->\n"
+    "                            Value = Fun(),\n"
+    "                            persistent_term:put(StoreKey, {done, Value}),\n"
+    "                            Value\n"
+    "                    end\n"
+    "                end)\n"
+    "            after erlang:erase(RunningKey) end\n"
+    "    end.\n\n"
+    "terra_thread_local(Key, Fun) ->\n"
+    "    StoreKey = {?MODULE, terra_thread_local, Key},\n"
+    "    case erlang:get(StoreKey) of\n"
+    "        undefined ->\n"
+    "            erlang:put(StoreKey, running),\n"
+    "            try\n"
+    "                Value = Fun(),\n"
+    "                erlang:put(StoreKey, {done, Value}),\n"
+    "                Value\n"
+    "            catch\n"
+    "                Class:Reason:Stacktrace ->\n"
+    "                    erlang:erase(StoreKey),\n"
+    "                    erlang:raise(Class, Reason, Stacktrace)\n"
+    "            end;\n"
+    "        running -> erlang:error({terra_thread_local_reentrant, Key});\n"
+    "        {done, Value} -> Value\n"
+    "    end.\n\n"
+    "terra_atomic(Value) when is_integer(Value) ->\n"
+    "    Ref = atomics:new(1, [{signed, true}]),\n"
+    "    ok = atomics:put(Ref, 1, Value),\n"
+    "    Ref.\n\n"
+    "terra_global_atomic(Key, Fun) ->\n"
+    "    terra_global({atomic, Key}, fun() -> terra_atomic(Fun()) end).\n\n"
     "terra_once(Key, Fun) ->\n"
     "    StoreKey = {?MODULE, terra_once, Key},\n"
     "    case erlang:get(StoreKey) of\n"

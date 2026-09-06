@@ -48,6 +48,11 @@ local Int x = 10;
 temp Var zss = Var();
 ```
 
+`global` values are initialized successfully once and shared by all BEAM
+processes running the generated module. `thread_local` values initialize once
+per BEAM process. `atomic` stores `Int` or `SInt` values in a BEAM atomic cell,
+and `computed` reevaluates its expression whenever the binding is read.
+
 2. Functions
 - Functions support multiple Return Values
 - Functions support tail-call optimization

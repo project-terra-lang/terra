@@ -66,11 +66,31 @@ type_checking_pass(#{functions := Functions, signatures := Signatures,
                      entry := Entry} = Context) ->
     case parse_bodies(Functions, Signatures, []) of
         {ok, Parsed} ->
-            Program = #{kind => program, entry => Entry,
-                        functions => lists:reverse(Parsed)},
-            {ok, Context#{program => Program}};
+            ParsedFunctions = lists:reverse(Parsed),
+            case duplicate_global_name(ParsedFunctions) of
+                none ->
+                    Program = #{kind => program, entry => Entry,
+                                functions => ParsedFunctions},
+                    {ok, Context#{program => Program}};
+                Name -> {error, {duplicate_global, Name}}
+            end;
         Error -> Error
     end.
+
+duplicate_global_name(Functions) ->
+    duplicate_name([#{name => Name} || Name <- global_names(Functions)], []).
+
+global_names(#{kind := variable, scope := global, name := Name} = Statement) ->
+    [Name | lists:append([global_names(Value)
+                         || Value <- maps:values(maps:remove(name, Statement))])];
+global_names(#{kind := multi_binding, scope := global, bindings := Bindings,
+               value := Value}) ->
+    [maps:get(name, Binding) || Binding <- Bindings] ++ global_names(Value);
+global_names(Value) when is_map(Value) ->
+    lists:append([global_names(Child) || Child <- maps:values(Value)]);
+global_names(Value) when is_list(Value) ->
+    lists:append([global_names(Child) || Child <- Value]);
+global_names(_Value) -> [].
 
 unreachable_code_pass(#{program := #{functions := Functions}} = Context) ->
     case first_unreachable_statement(Functions) of
@@ -705,12 +725,19 @@ bind_multiple(Scope, Bindings, Tokens, F, Sigs, Env, Acc) ->
                 {ok, Actual} ->
                     case types_accept(Expected, Actual) of
                         true ->
-                            Items = [#{type => Type, name => Name} || {Type, Name} <- Bindings],
-                            Stmt = #{kind => multi_binding, scope => Scope,
-                                     bindings => Items, value => Value},
-                            NewEnv = lists:foldl(fun({T, N}, E) -> env_put(N, T, E) end,
-                                                 Env, Bindings),
-                            parse_statements(Remaining, F, Sigs, NewEnv, [Stmt | Acc]);
+                            case validate_global_binding(Scope, Bindings, Value) of
+                                ok ->
+                                    Items = [#{type => Type, name => Name}
+                                             || {Type, Name} <- Bindings],
+                                    Stmt = #{kind => multi_binding, scope => Scope,
+                                             bindings => Items, value => Value},
+                                    NewEnv = lists:foldl(
+                                        fun({T, N}, E) -> env_put(N, T, E) end,
+                                        Env, Bindings),
+                                    parse_statements(Remaining, F, Sigs, NewEnv,
+                                                     [Stmt | Acc]);
+                                Error -> Error
+                            end;
                         false -> {error, {return_type_mismatch, Expected, Actual}}
                     end;
                 Error -> Error
@@ -743,13 +770,18 @@ parse_scoped_declaration([{keyword, Scope}, {lparen, "("} | Rest], Sigs, Env) ->
         {ok, Bindings, [{equals, "="} | ValueTokens]} ->
             case parse_expr(ValueTokens, Sigs, Env) of
                 {ok, Value, [{endofline, ";"}]} ->
-                    Items = [#{type => Type, name => Name}
-                             || {Type, Name} <- Bindings],
-                    NewEnv = lists:foldl(
-                        fun({Type, Name}, Current) -> env_put(Name, Type, Current) end,
-                        Env, Bindings),
-                    {ok, #{kind => multi_binding, scope => Scope, bindings => Items,
-                           value => Value}, NewEnv};
+                    case validate_global_binding(Scope, Bindings, Value) of
+                        ok ->
+                            Items = [#{type => Type, name => Name}
+                                     || {Type, Name} <- Bindings],
+                            NewEnv = lists:foldl(
+                                fun({Type, Name}, Current) ->
+                                    env_put(Name, Type, Current)
+                                end, Env, Bindings),
+                            {ok, #{kind => multi_binding, scope => Scope,
+                                   bindings => Items, value => Value}, NewEnv};
+                        Error -> Error
+                    end;
                 {ok, _Value, Other} -> {error, {expected_endofline, Other}};
                 Error -> Error
             end;
@@ -770,10 +802,16 @@ parse_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, 
                            end,
                     case type_accepts(Type, ActualType) of
                         true ->
-                             {ok, #{kind => variable, scope => Scope, eval => Modifier,
-                               type => Type, name => Name, value => Value,
-                               concurrency => concurrency(Modifier)},
-                             env_put(Name, Type, Env)};
+                            case validate_storage_declaration(Scope, Modifier, Type,
+                                                              Name, Value) of
+                                ok ->
+                                    {ok, #{kind => variable, scope => Scope,
+                                      eval => Modifier, type => Type, name => Name,
+                                      value => Value,
+                                      concurrency => concurrency(Modifier)},
+                                     env_put(Name, Type, Env)};
+                                Error -> Error
+                            end;
                         false ->
                             {error, {type_mismatch, Type, Value}}
                     end;
@@ -797,6 +835,47 @@ parse_parenthesized_bindings(Other, _Acc) ->
 concurrency(atomic) -> atomic;
 concurrency(thread_local) -> thread_local;
 concurrency(_Modifier) -> shared.
+
+validate_storage_declaration(global, thread_local, _Type, _Name, _Value) ->
+    {error, {invalid_storage_combination, global, thread_local}};
+validate_storage_declaration(global, computed, _Type, _Name, _Value) ->
+    {error, {invalid_storage_combination, global, computed}};
+validate_storage_declaration(global, lazy, _Type, _Name, _Value) ->
+    {error, {invalid_storage_combination, global, lazy}};
+validate_storage_declaration(global, atomic, Type, Name, Value) ->
+    case validate_atomic_type(Type) of
+        ok -> validate_closed_global(Name, Value);
+        Error -> Error
+    end;
+validate_storage_declaration(global, _Modifier, _Type, Name, Value) ->
+    validate_closed_global(Name, Value);
+validate_storage_declaration(_Scope, atomic, Type, _Name, _Value) ->
+    validate_atomic_type(Type);
+validate_storage_declaration(_Scope, _Modifier, _Type, _Name, _Value) ->
+    ok.
+
+validate_closed_global(Name, Value) ->
+    case expression_has_variable_reference(Value) of
+        true -> {error, {global_initializer_not_closed, Name}};
+        false -> ok
+    end.
+
+validate_global_binding(global, [{_Type, Name} | _], Value) ->
+    validate_closed_global(Name, Value);
+validate_global_binding(_Scope, _Bindings, _Value) -> ok.
+
+validate_atomic_type(int) -> ok;
+validate_atomic_type(sint) -> ok;
+validate_atomic_type(Type) -> {error, {invalid_atomic_type, Type}}.
+
+expression_has_variable_reference({var_ref, _Name}) -> true;
+expression_has_variable_reference(Value) when is_tuple(Value) ->
+    lists:any(fun expression_has_variable_reference/1, tuple_to_list(Value));
+expression_has_variable_reference(Value) when is_list(Value) ->
+    lists:any(fun expression_has_variable_reference/1, Value);
+expression_has_variable_reference(Value) when is_map(Value) ->
+    lists:any(fun expression_has_variable_reference/1, maps:values(Value));
+expression_has_variable_reference(_Value) -> false.
 
 take_statement([], _Depth, _Acc) -> {error, unterminated_statement};
 take_statement([T = {endofline, ";"} | Rest], 0, Acc) ->

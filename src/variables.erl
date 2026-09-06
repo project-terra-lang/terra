@@ -94,7 +94,8 @@ parse_variable_declaration(Scope, Type, Name, Rest, Env, Lazy, EvalMode, Concurr
                     Evaluated = maybe_eval_const(Value, Env, EvalMode),
                     case validate_value(Type, Evaluated, Env) of
                         {ok, InferredType} ->
-                            case validate_concurrency(Concurrency, InferredType) of
+                            case validate_storage(Scope, Lazy, EvalMode, Concurrency,
+                                                  InferredType, Name, Evaluated) of
                                 ok ->
                                     TypeInfo = describe_type(InferredType, wrap_lazy(Evaluated, Lazy), Env),
                                     {ok, #{scope => Scope, type => InferredType, name => Name,
@@ -725,14 +726,35 @@ validate_concurrency(atomic, int) ->
     ok;
 validate_concurrency(atomic, sint) ->
     ok;
-validate_concurrency(atomic, number) ->
-    ok;
-validate_concurrency(atomic, bool) ->
-    ok;
-validate_concurrency(atomic, atom) ->
-    ok;
 validate_concurrency(atomic, Type) ->
     {error, {invalid_atomic_type, Type}}.
+
+validate_storage(global, _Lazy, _EvalMode, thread_local, _Type, _Name, _Value) ->
+    {error, {invalid_storage_combination, global, thread_local}};
+validate_storage(global, _Lazy, computed, _Concurrency, _Type, _Name, _Value) ->
+    {error, {invalid_storage_combination, global, computed}};
+validate_storage(global, true, _EvalMode, _Concurrency, _Type, _Name, _Value) ->
+    {error, {invalid_storage_combination, global, lazy}};
+validate_storage(global, _Lazy, _EvalMode, Concurrency, Type, Name, Value) ->
+    case validate_concurrency(Concurrency, Type) of
+        ok ->
+            case expression_has_variable_reference(Value) of
+                true -> {error, {global_initializer_not_closed, Name}};
+                false -> ok
+            end;
+        Error -> Error
+    end;
+validate_storage(_Scope, _Lazy, _EvalMode, Concurrency, Type, _Name, _Value) ->
+    validate_concurrency(Concurrency, Type).
+
+expression_has_variable_reference({var_ref, _Name}) -> true;
+expression_has_variable_reference(Value) when is_tuple(Value) ->
+    lists:any(fun expression_has_variable_reference/1, tuple_to_list(Value));
+expression_has_variable_reference(Value) when is_list(Value) ->
+    lists:any(fun expression_has_variable_reference/1, Value);
+expression_has_variable_reference(Value) when is_map(Value) ->
+    lists:any(fun expression_has_variable_reference/1, maps:values(Value));
+expression_has_variable_reference(_Value) -> false.
 
 describe_type(number, {int, _Value}, _Env) ->
     #{kind => number, subtype => int};
