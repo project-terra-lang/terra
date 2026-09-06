@@ -165,6 +165,8 @@ available for a future standard-library function.
 - `terra build file.terra` generates Erlang and compiles a `.beam` module.
 - `terra run file.terra [args...]` builds the module and runs Terra `Main` on
   the BEAM VM.
+- Generated BEAM debug metadata preserves Terra source paths and function
+  locations so runtime diagnostics show Terra code frames.
 - `TERRA_BUILD_DIR` can override the default `terra_build/` output directory.
 - Terra multiple returns compile to Erlang tuples, immutable locals compile to
   Erlang single-assignment variables, and calls returned directly from a

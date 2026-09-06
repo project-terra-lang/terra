@@ -1,0 +1,8 @@
+function Float Divide(Int value) {
+    local Int adjusted = value + 1;
+    return adjusted / 0;
+}
+
+function Number Main(String Args) {
+    return Divide(4);
+}

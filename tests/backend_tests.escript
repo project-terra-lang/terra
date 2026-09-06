@@ -10,6 +10,7 @@ main(_Args) ->
                test_once_semantics(OutDir), test_once_failure(OutDir),
                test_once_reentrancy(OutDir),
                test_storage_semantics(OutDir), test_computed_deferred(OutDir),
+               test_source_map(OutDir),
                test_showcase_compile(OutDir)],
     case lists:member(fail, Results) of
         true ->
@@ -248,6 +249,28 @@ test_computed_deferred(OutDir) ->
             io:format("not ok - computed initializer is deferred~n  got: ~p~n", [Other]),
             fail
     end.
+
+test_source_map(OutDir) ->
+    Path = "tests/programs/backend_source_map.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_backend_source_map, Source},
+         {error, {runtime_error, error, badarith, Stacktrace}}} ->
+            Binary = iolist_to_binary(Source),
+            expect("runtime stack preserves Terra source map",
+                   contains(Binary, <<"-file(\"tests/programs/backend_source_map.terra\"">>)
+                   andalso has_terra_frame(Stacktrace, Path));
+        Other ->
+            io:format("not ok - runtime stack preserves Terra source map~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+has_terra_frame(Stacktrace, Path) ->
+    lists:any(fun({_Module, _Function, _Arity, Info}) ->
+                      proplists:get_value(file, Info) == Path andalso
+                      proplists:get_value(line, Info, 0) > 0;
+                 (_) -> false
+              end, Stacktrace).
 
 expect(Name, true) ->
     io:format("ok - ~s~n", [Name]),

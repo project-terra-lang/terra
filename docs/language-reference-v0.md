@@ -28,6 +28,13 @@ parsing -> name_resolution -> type_checking -> unreachable_code -> definite_retu
 program AST. `transpiler:codegen_pass/1` turns that lowered AST into Erlang
 source.
 
+File parsing preserves each function's Terra source path and declaration line.
+Code generation emits Erlang `-file` metadata for the exported entry wrapper,
+ordinary functions, and tail-step helpers, then resets runtime-only helpers to
+a synthetic file. BEAM stack traces therefore retain Terra frames, and
+`terra run` uses the mapped function boundary to render the nearest executable
+Terra source line when a runtime failure occurs.
+
 ## Lexical Rules
 
 Whitespace separates tokens and has no meaning outside strings and character

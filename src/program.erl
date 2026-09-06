@@ -13,7 +13,11 @@ parse(Tokens) ->
 
 parse_file(Path) ->
     case tokenizer:tokenize_file(Path) of
-        {ok, Tokens} -> parse(Tokens);
+        {ok, Tokens} ->
+            case parse(Tokens) of
+                {ok, Program} -> {ok, Program#{source_path => Path}};
+                Error -> Error
+            end;
         Error -> Error
     end.
 
@@ -111,11 +115,41 @@ definite_return_pass(#{program := #{functions := Functions}} = Context) ->
 warning_analysis_pass(#{program := Program} = Context) ->
     {ok, Context#{program => Program#{warnings => warnings:analyze(Program)}}}.
 
-lowering_pass(#{program := Program, source_span := SourceSpan,
+lowering_pass(#{program := Program, source_span := SourceSpan, tokens := Tokens,
                 completed_passes := Completed} = Context) ->
     Passes = lists:reverse([lowering | Completed]),
-    Lowered = (add_ast_spans(Program, SourceSpan))#{passes => Passes},
+    Located = add_function_locations(Program, Tokens),
+    Lowered = (add_ast_spans(Located, SourceSpan))#{passes => Passes},
     {ok, Context#{program => Lowered}}.
+
+add_function_locations(#{functions := Functions} = Program, Tokens) ->
+    {Located, _Rest} = locate_functions(Functions, Tokens, []),
+    Program#{functions => Located}.
+
+locate_functions([], Tokens, Acc) -> {lists:reverse(Acc), Tokens};
+locate_functions([Function | Rest], Tokens, Acc) ->
+    Name = maps:get(name, Function),
+    case find_function_token(Name, Tokens) of
+        {ok, Span, Remaining} ->
+            Start = maps:get(start, Span),
+            Located = Function#{source_line => maps:get(line, Start), span => Span},
+            locate_functions(Rest, Remaining, [Located | Acc]);
+        not_found ->
+            locate_functions(Rest, Tokens, [Function | Acc])
+    end.
+
+find_function_token(_Name, []) -> not_found;
+find_function_token(Name, [{keyword, function, Span} | Rest]) ->
+    case find_function_name(Name, Rest) of
+        {ok, Remaining} -> {ok, Span, Remaining};
+        not_found -> find_function_token(Name, Rest)
+    end;
+find_function_token(Name, [_Token | Rest]) -> find_function_token(Name, Rest).
+
+find_function_name(_Name, []) -> not_found;
+find_function_name(Name, [{id, Name, _Span} | Rest]) -> {ok, Rest};
+find_function_name(_Name, [{lbrace, _Value, _Span} | _Rest]) -> not_found;
+find_function_name(Name, [_Token | Rest]) -> find_function_name(Name, Rest).
 
 parse_functions([], Acc) ->
     {ok, lists:reverse(Acc)};

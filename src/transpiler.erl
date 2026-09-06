@@ -74,21 +74,32 @@ codegen_pass(#{module := Module, program := Program} = Context) ->
     Passes = maps:get(passes, Program, []) ++ [codegen],
     {ok, Context#{source => Source, passes => Passes}}.
 
-generate_module(Module, #{functions := Functions}) ->
+generate_module(Module, #{functions := Functions} = Program) ->
+    SourcePath = maps:get(source_path, Program, "terra_source"),
+    MainLine = function_source_line("Main", Functions),
     ["-module(", atom_to_list(Module), ").\n",
      "-export([main/1]).\n\n",
+     source_attribute(SourcePath, MainLine),
      "main(Args) ->\n",
      "    terra_fn_main(terra_args(Args)).\n\n",
-     [generate_function(Function) || Function <- Functions],
+     [generate_function(Function, SourcePath) || Function <- Functions],
+     "-file(\"terra_runtime\", 1).\n",
      runtime_helpers()].
 
-generate_function(Function) ->
-    case lists:usort(tail_calls(maps:get(statements, Function, []))) of
-        [] -> generate_regular_function(Function);
-        TailCalls -> generate_tail_function(Function, TailCalls)
+function_source_line(Name, Functions) ->
+    case [maps:get(source_line, Function, 1) || Function <- Functions,
+                                               maps:get(name, Function) == Name] of
+        [Line] -> Line;
+        _ -> 1
     end.
 
-generate_regular_function(Function) ->
+generate_function(Function, SourcePath) ->
+    case lists:usort(tail_calls(maps:get(statements, Function, []))) of
+        [] -> generate_regular_function(Function, SourcePath);
+        TailCalls -> generate_tail_function(Function, TailCalls, SourcePath)
+    end.
+
+generate_regular_function(Function, SourcePath) ->
     Name = maps:get(name, Function),
     Params = maps:get(params, Function),
     {ParamNames, Env, Counter} = bind_parameters(Params, 1, [], #{}),
@@ -96,14 +107,15 @@ generate_regular_function(Function) ->
         generate_statements(maps:get(statements, Function, []), Env, Counter, 2, Name),
     Default = default_value(maps:get(return_types, Function)),
     Expressions = Body ++ [[indent(2), Default]],
-    [function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",
+    [source_attribute(SourcePath, maps:get(source_line, Function, 1)),
+     function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",
      indent(1), "try\n",
      join_expressions(Expressions), "\n",
      indent(1), "catch\n",
      indent(2), "throw:{terra_return, TerraReturnValue} -> TerraReturnValue\n",
      indent(1), "end.\n\n"].
 
-generate_tail_function(Function, TailCalls) ->
+generate_tail_function(Function, TailCalls, SourcePath) ->
     Name = maps:get(name, Function),
     Params = maps:get(params, Function),
     {ParamNames, Env, Counter} = bind_parameters(Params, 1, [], #{}),
@@ -114,10 +126,13 @@ generate_tail_function(Function, TailCalls) ->
         generate_statements(maps:get(statements, Function, []), Env, Counter, 2, Name),
     Default = default_value(maps:get(return_types, Function)),
     Expressions = Body ++ [[indent(2), Default]],
-    [function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",
+    SourceLine = maps:get(source_line, Function, 1),
+    [source_attribute(SourcePath, SourceLine),
+     function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",
      indent(1), "case ", StepName, "(", lists:join(", ", ParamNames), ") of\n",
      indent(2), lists:join([";\n", indent(2)], Dispatch), "\n",
      indent(1), "end.\n\n",
+     source_attribute(SourcePath, SourceLine),
      StepName, "(", lists:join(", ", ParamNames), ") ->\n",
      indent(1), "try\n",
      join_expressions(Expressions), "\n",
@@ -127,6 +142,9 @@ generate_tail_function(Function, TailCalls) ->
      indent(2), "throw:{terra_tail_call, TerraTarget, TerraArgs} -> ",
      "{terra_tail_call, TerraTarget, TerraArgs}\n",
      indent(1), "end.\n\n"].
+
+source_attribute(Path, Line) ->
+    ["-file(", io_lib:format("~p", [Path]), ", ", integer_to_list(max(1, Line)), ").\n"].
 
 tail_dispatch_clause(Target, Arity) ->
     Args = ["TerraTailArg" ++ integer_to_list(Index)

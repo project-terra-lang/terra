@@ -216,10 +216,7 @@ render_formatted(Path, Reason, Title, Message, Help) ->
     case file:read_file(Path) of
         {ok, Source} ->
             Lines = string:split(binary_to_list(Source), "\n", all),
-            LocationResult = case locate(Reason) of
-                                 none -> locate(Lines, Reason);
-                                 SpanLocation -> SpanLocation
-                             end,
+            LocationResult = locate_for_source(Lines, Reason),
             case LocationResult of
                 none ->
                     [diagnostic_header(Title, Path), "\n",
@@ -234,6 +231,79 @@ render_formatted(Path, Reason, Title, Message, Help) ->
             [diagnostic_header(Title, Path), "\n",
              Message, "\n\nHint: ", Help, "\n"]
     end.
+
+locate_for_source(Lines, {runtime_error, _Class, _Reason, Stacktrace} = Reason) ->
+    case runtime_source_location(Lines, Stacktrace) of
+        none -> locate(Lines, Reason);
+        Location -> Location
+    end;
+locate_for_source(Lines, Reason) ->
+    case locate(Reason) of
+        none -> locate(Lines, Reason);
+        SpanLocation -> SpanLocation
+    end.
+
+runtime_source_location(_Lines, []) -> none;
+runtime_source_location(Lines, [{_Module, Function, _Arity, Info} | Rest]) ->
+    File = proplists:get_value(file, Info, ""),
+    Line = proplists:get_value(line, Info, 0),
+    case filename:extension(File) == ".terra" andalso Line > 0 of
+        true -> nearest_terra_line(Lines, Function, Line);
+        false -> runtime_source_location(Lines, Rest)
+    end;
+runtime_source_location(Lines, [_Frame | Rest]) -> runtime_source_location(Lines, Rest).
+
+nearest_terra_line(Lines, Function, MappedLine) ->
+    case terra_function_bounds(Lines, Function) of
+        none -> fallback_location(Lines, min(MappedLine, length(Lines)));
+        {Start, End} ->
+            Candidate = min(max(Start, MappedLine), End),
+            nearest_executable_line(Lines, Candidate, Start)
+    end.
+
+terra_function_bounds(Lines, Function) ->
+    Name = generated_terra_name(Function),
+    case find_line(Lines, 1, length(Lines), fun(Line) ->
+        is_function_line(Line) andalso function_name_lower(Line) == Name
+    end) of
+        none -> none;
+        {Start, _Line} ->
+            case find_line(Lines, Start + 1, length(Lines), fun is_function_line/1) of
+                none -> {Start, length(Lines)};
+                {Next, _} -> {Start, Next - 1}
+            end
+    end.
+
+generated_terra_name(Function) ->
+    Raw = atom_to_list(Function),
+    WithoutPrefix = case lists:prefix("terra_fn_", Raw) of
+                        true -> string:slice(Raw, length("terra_fn_"));
+                        false -> Raw
+                    end,
+    case string:split(WithoutPrefix, "_tail_step", leading) of
+        [Name, _] -> Name;
+        [Name] -> Name
+    end.
+
+function_name_lower(Line) ->
+    case re:run(Line, "^\\s*function\\s+.*?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(",
+                [{capture, [1], list}]) of
+        {match, [Name]} -> string:lowercase(Name);
+        nomatch -> ""
+    end.
+
+nearest_executable_line(Lines, Number, Start) when Number >= Start ->
+    Line = lists:nth(Number, Lines),
+    Trimmed = string:trim(Line),
+    case Trimmed =/= [] andalso Trimmed =/= "}" andalso
+         not lists:prefix("--", Trimmed) andalso
+         not lists:prefix("function ", Trimmed) of
+        true ->
+            Column = length(Line) - length(string:trim(Line, leading)) + 1,
+            {Number, Column, max(1, length(Trimmed))};
+        false -> nearest_executable_line(Lines, Number - 1, Start)
+    end;
+nearest_executable_line(Lines, _Number, Start) -> fallback_location(Lines, Start).
 
 format_warning(#{code := unused_variable, function := Function, name := Name}) ->
     {unused_variable,
@@ -267,8 +337,20 @@ locate({with_span, _Reason, Span}) ->
     span_location(Span);
 locate({in_function, _Name, Reason}) ->
     locate(Reason);
+locate({runtime_error, _Class, _Reason, Stacktrace}) ->
+    runtime_stack_location(Stacktrace);
 locate(_Reason) ->
     none.
+
+runtime_stack_location([]) -> none;
+runtime_stack_location([{_Module, _Function, _Arity, Info} | Rest]) ->
+    File = proplists:get_value(file, Info, ""),
+    Line = proplists:get_value(line, Info, 0),
+    case filename:extension(File) == ".terra" andalso Line > 0 of
+        true -> {Line, 1, 1};
+        false -> runtime_stack_location(Rest)
+    end;
+runtime_stack_location([_Frame | Rest]) -> runtime_stack_location(Rest).
 
 span_location(#{start := #{line := Line, column := Column},
                 'end' := #{line := Line, column := EndColumn}})
