@@ -17,13 +17,15 @@ function Number Main(String Args) {
     local Result pending = Result.Pending();
     stdout(pending.tag);
 
-    if result.tag == {
-        case :Ok:
+    if result == {
+        case Result.Ok(bind value):
             stdout(Args);
-            return result.value;
-        case :Error:
-            stdout(result.message);
+            return value;
+        case Result.Error(bind message):
+            stdout(message);
             return -1;
+        case Result.Pending():
+            return 0;
         case:
             return 0;
     }

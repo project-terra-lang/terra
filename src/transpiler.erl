@@ -382,6 +382,21 @@ generate_switch_cases([#{pattern := default, statements := Statements}],
     {Body, _BodyEnv, NextCounter} =
         generate_statements(Statements, Env, Counter, Level, FunctionName),
     {block(Body, Level), NextCounter};
+generate_switch_cases([#{pattern := {variant_pattern, EnumName, VariantName, Bindings},
+                         statements := Statements} | Rest],
+                      SubjectName, Env, Counter, Level, FunctionName) ->
+    {Pattern, PatternEnv, Counter1} =
+        generate_variant_pattern(EnumName, VariantName, Bindings, Env, Counter),
+    {Body, _BodyEnv, Counter2} =
+        generate_statements(Statements, PatternEnv, Counter1, Level + 2, FunctionName),
+    {Fallback, NextCounter} =
+        generate_switch_cases(Rest, SubjectName, Env, Counter2,
+                              Level + 2, FunctionName),
+    Code = [indent(Level), "case ", SubjectName, " of\n",
+            indent(Level + 1), Pattern, " ->\n", block(Body, Level + 2),
+            ";\n", indent(Level + 1), "_ ->\n", Fallback, "\n",
+            indent(Level), "end"],
+    {Code, NextCounter};
 generate_switch_cases([#{pattern := Pattern, statements := Statements} | Rest],
                       SubjectName, Env, Counter, Level, FunctionName) ->
     {Body, _BodyEnv, Counter1} =
@@ -394,6 +409,24 @@ generate_switch_cases([#{pattern := Pattern, statements := Statements} | Rest],
             ";\n", indent(Level + 1), "_ ->\n", Fallback, "\n",
             indent(Level), "end"],
     {Code, NextCounter}.
+
+generate_variant_pattern(EnumName, VariantName, Bindings, Env, Counter) ->
+    Base = [["'$terra_enum' := ", io_lib:format("~p", [list_to_atom(EnumName)])],
+            ["tag := ", io_lib:format("~p", [list_to_atom(VariantName)])]],
+    {Fields, PatternEnv, NextCounter} =
+        generate_pattern_bindings(Bindings, Env, Counter, []),
+    {["#{", lists:join(", ", Base ++ Fields), "}"], PatternEnv, NextCounter}.
+
+generate_pattern_bindings([], Env, Counter, Acc) ->
+    {lists:reverse(Acc), Env, Counter};
+generate_pattern_bindings([#{binding := ignore} | Rest], Env, Counter, Acc) ->
+    generate_pattern_bindings(Rest, Env, Counter, Acc);
+generate_pattern_bindings([#{name := Field, binding := Name} | Rest],
+                          Env, Counter, Acc) ->
+    ErlangName = variable_name(Name, Counter),
+    Entry = [io_lib:format("~p", [list_to_atom(Field)]), " := ", ErlangName],
+    generate_pattern_bindings(Rest, maps:put(Name, {direct, ErlangName}, Env),
+                              Counter + 1, [Entry | Acc]).
 
 bind_result_names([], Counter, Env, Acc) ->
     {lists:reverse(Acc), Env, Counter};

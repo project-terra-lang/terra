@@ -165,6 +165,24 @@ format({unknown_enum_field, Enum, Field}) ->
     {unknown_enum_field,
      io_lib:format("Enum ~s has no payload field named ~s.", [Enum, Field]),
      "Use .tag or a payload field declared by one of the enum variants."};
+format({expected_variant_pattern_binding, _Tokens}) ->
+    {expected_variant_pattern_binding,
+     "Enum pattern payloads must explicitly bind or ignore each field.",
+     "Use bind name to capture a payload or _ to ignore it."};
+format({enum_pattern_type_mismatch, SubjectType, Enum}) ->
+    {enum_pattern_type_mismatch,
+     io_lib:format("This switch handles ~s, not enum ~s.",
+                   [type_name(SubjectType), Enum]),
+     "Match variants belonging to the switch subject's enum type."};
+format({variant_pattern_arity, Enum, Variant, Expected, Actual}) ->
+    {variant_pattern_arity,
+     io_lib:format("Pattern ~s.~s expects ~p payload field(s), but received ~p.",
+                   [Enum, Variant, Expected, Actual]),
+     "Bind or ignore every payload field in declaration order."};
+format({duplicate_pattern_binding, Name}) ->
+    {duplicate_pattern_binding,
+     io_lib:format("Pattern binding ~s is written more than once.", [Name]),
+     "Give each bound payload a distinct name."};
 format({unknown_variable, Name}) ->
     {unknown_variable,
      io_lib:format("Variable ~s is not available here.", [Name]),
@@ -343,14 +361,18 @@ render(Path, Reason) ->
 
 render_warning(Path, Warning) ->
     {Code, Message, Help} = format_warning(Warning),
-    Label = string:uppercase(string:replace(atom_to_list(Code), "_", " ", all)),
+    Label = diagnostic_label(Code),
     Reason = warning_reason(Warning),
     Title = lists:flatten(["WARNING ", Label, " [", atom_to_list(Code), "]"]),
     render_formatted(Path, Reason, Title, Message, Help).
 
 diagnostic_title(Code) ->
-    Label = string:uppercase(string:replace(atom_to_list(Code), "_", " ", all)),
+    Label = diagnostic_label(Code),
     lists:flatten([Label, " [", atom_to_list(Code), "]"]).
+
+diagnostic_label(Code) ->
+    Words = string:replace(atom_to_list(Code), "_", " ", all),
+    string:uppercase(lists:flatten(Words)).
 
 render_formatted(Path, Reason, Title, Message, Help) ->
     case file:read_file(Path) of

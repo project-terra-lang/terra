@@ -453,6 +453,29 @@ if status == {
 Case patterns must be type-compatible with the switch subject. The default case
 must be last. Duplicate case patterns are rejected.
 
+Enum switches may match a declared variant and destructure its payload:
+
+```terra
+if result == {
+  case Result.Ok(bind value):
+    return value;
+  case Result.Error(bind message):
+    stdout(message);
+    return -1;
+  case Result.Pending():
+    return 0;
+  case:
+    return 0;
+}
+```
+
+Each payload position must use `bind name` or `_`. Bound names receive the
+declared payload type, are immutable, and exist only inside that case. `_`
+matches without creating a binding. Enum name, variant name, payload arity, and
+duplicate bindings are checked statically. Terra v0 intentionally limits
+destructuring patterns to enum switch cases; literals and expressions remain
+ordinary equality cases.
+
 ### Loops
 
 `for_each` iterates over `List`, `Tuple`, `Map`, `RestrictedMap`, and `String`
@@ -541,8 +564,11 @@ if_stmt         = "if", expr, block, { "elseif", expr, block },
 unless_stmt     = "unless", expr, block, [ "else", block ] ;
 switch_stmt     = "if", expr, "==", "{", case_clause, { case_clause },
                   default_case, "}" ;
-case_clause     = "case", expr, ":", { statement } ;
+case_clause     = "case", ( enum_pattern | expr ), ":", { statement } ;
 default_case    = "case", ":", { statement } ;
+enum_pattern    = identifier, ".", identifier, "(", [ pattern_arg,
+                  { ",", pattern_arg } ], ")" ;
+pattern_arg     = "bind", identifier | "_" ;
 
 for_each_stmt   = "for_each", identifier, "in", expr, block ;
 for_range_stmt  = "for", call_to_range, block ;

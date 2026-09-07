@@ -17,6 +17,7 @@ main(_Args) ->
                test_restricted_map(OutDir),
                test_records(OutDir),
                test_enums(OutDir),
+               test_enum_pattern_ignore(OutDir),
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_source_map(OutDir),
@@ -374,9 +375,20 @@ test_enums(OutDir) ->
             Binary = iolist_to_binary(Source),
             expect("tagged enums run on BEAM",
                    contains(Binary, <<"#{'$terra_enum' => 'Result', tag => 'Ok'">>) andalso
-                   contains(Binary, <<"terra_member(">>));
+                   contains(Binary, <<"'$terra_enum' := 'Result', tag := 'Ok'">>) andalso
+                   contains(Binary, <<"value := Terra_value_">>));
         Other ->
             io:format("not ok - tagged enums run on BEAM~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_enum_pattern_ignore(OutDir) ->
+    Path = "tests/programs/enum_pattern_ignore.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_enum_pattern_ignore, 3, _BeamPath, _ErlangPath} ->
+            expect("enum patterns can ignore payloads", true);
+        Other ->
+            io:format("not ok - enum patterns can ignore payloads~n  got: ~p~n", [Other]),
             fail
     end.
 

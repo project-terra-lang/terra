@@ -104,6 +104,25 @@ immutable data; custom validation or other behavior belongs in an ordinary user
 function. Every enum value exposes its variant as the `.tag` Atom, and variant
 payloads use their declared field names.
 
+Switches can match enum variants and bind payloads explicitly:
+```lua
+if result == {
+    case Result.Ok(bind value):
+        return value;
+    case Result.Error(bind message):
+        stdout(message);
+        return -1;
+    case Result.Pending():
+        return 0;
+    case:
+        return 0;
+}
+```
+
+`bind name` creates an immutable binding scoped to that case. `_` ignores a
+payload field. Pattern matching is intentionally limited to enum cases where it
+replaces manual tag checks and unsafe payload access.
+
 2. Functions
 - Functions support multiple Return Values
 - Functions support tail-call optimization

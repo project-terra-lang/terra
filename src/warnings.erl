@@ -42,11 +42,7 @@ analyze_statement(#{kind := unless, condition := Condition,
     analyze_optional_child(Else, State1);
 analyze_statement(#{kind := switch, subject := Subject, cases := Cases}, State) ->
     lists:foldl(fun(Case, Current) ->
-        PatternState = case maps:get(pattern, Case) of
-                           default -> Current;
-                           Pattern -> analyze_expr(Pattern, Current)
-                       end,
-        analyze_child(maps:get(statements, Case), PatternState)
+        analyze_case(Case, Current)
     end, analyze_expr(Subject, State), Cases);
 analyze_statement(#{kind := for_each, binding := Binding, iterable := Iterable,
                     statements := Statements}, State) ->
@@ -63,6 +59,19 @@ analyze_statement(#{kind := Kind, condition := Condition, statements := Statemen
     State3 = analyze_expr(Condition, State2),
     leave_scope(analyze_statements(Statements, State3));
 analyze_statement(_Statement, State) -> State.
+
+analyze_case(#{pattern := {variant_pattern, _Enum, _Variant, Bindings},
+               statements := Statements}, State) ->
+    Scoped = enter_scope(State),
+    WithBindings = lists:foldl(fun
+        (#{binding := ignore}, Current) -> Current;
+        (#{binding := Name}, Current) -> declare(Name, variable, true, Current)
+    end, Scoped, Bindings),
+    leave_scope(analyze_statements(Statements, WithBindings));
+analyze_case(#{pattern := default, statements := Statements}, State) ->
+    analyze_child(Statements, State);
+analyze_case(#{pattern := Pattern, statements := Statements}, State) ->
+    analyze_child(Statements, analyze_expr(Pattern, State)).
 
 analyze_loop(Iterator, Statements, State) ->
     State1 = enter_scope(analyze_expr(Iterator, State)),

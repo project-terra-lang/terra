@@ -103,7 +103,16 @@ function Number Main(String Args) {
   stdout(player.name);
   stdout(player.score);
   stdout(player_status.tag);
-  stdout(player_status.code);
+  if player_status == {
+    case ShowcaseStatus.Ready(bind code):
+      stdout(code);
+    case ShowcaseStatus.Failed(bind message):
+      stdout(message);
+    case ShowcaseStatus.Waiting():
+      stdout("waiting");
+    case:
+      stdout("unknown status");
+  }
   stdout(id);
   stdout(role);
 

@@ -119,6 +119,16 @@ main(_Args) ->
              {"enum variants require explicit declarations",
               "tests/programs/enum_implicit_variant.terra",
               fun expect_enum_implicit_variant/1},
+             {"enum pattern arity", "tests/programs/enum_pattern_arity.terra",
+              fun expect_enum_pattern_arity/1},
+             {"enum pattern bindings do not leak",
+              "tests/programs/enum_pattern_binding_leak.terra",
+              fun expect_enum_pattern_binding_leak/1},
+             {"enum pattern bindings are unique",
+              "tests/programs/enum_pattern_duplicate_binding.terra",
+              fun expect_enum_pattern_duplicate_binding/1},
+             {"enum pattern payload ignore", "tests/programs/enum_pattern_ignore.terra",
+              fun(Result) -> element(1, Result) == ok end},
              {"try propagation expressions", "tests/programs/try_success.terra",
               fun expect_try_propagation/1},
              {"try requires function call", "tests/programs/try_invalid.terra",
@@ -251,6 +261,19 @@ expect_enum_implicit_variant({error, {expected_enum_variant, _Tokens}}) -> true;
 expect_enum_implicit_variant(
   {error, {with_span, {expected_enum_variant, _Tokens}, _Span}}) -> true;
 expect_enum_implicit_variant(_) -> false.
+
+expect_enum_pattern_arity(
+  {error, {in_function, "Main",
+           {variant_pattern_arity, "Result", "Ok", 1, 0}}}) -> true;
+expect_enum_pattern_arity(_) -> false.
+
+expect_enum_pattern_binding_leak(
+  {error, {in_function, "Main", {unknown_variable, "value"}}}) -> true;
+expect_enum_pattern_binding_leak(_) -> false.
+
+expect_enum_pattern_duplicate_binding(
+  {error, {in_function, "Main", {duplicate_pattern_binding, "value"}}}) -> true;
+expect_enum_pattern_duplicate_binding(_) -> false.
 
 expect_try_propagation({ok, Program}) ->
     Main = find_function("Main", maps:get(functions, Program)),

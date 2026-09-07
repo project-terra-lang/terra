@@ -924,6 +924,20 @@ parse_switch(Subject, BodyStart, F, Sigs, Env, Acc) ->
 
 parse_cases([], _SubjectType, _F, _Sigs, _Env, Acc, HasDefault) ->
     {ok, lists:reverse(Acc), HasDefault};
+parse_cases([{keyword, 'case'}, {id, EnumName}, {dot, "."}, {id, VariantName},
+             {lparen, "("} | Rest], SubjectType, F, Sigs, Env, Acc, HasDefault) ->
+    case parse_variant_pattern_args(Rest, []) of
+        {ok, Args, [{atomprefix, ":"} | BodyTokens]} ->
+            case validate_variant_pattern(EnumName, VariantName, Args,
+                                          SubjectType, Sigs) of
+                {ok, Pattern} ->
+                    parse_case_body_if_unique(Pattern, BodyTokens, SubjectType,
+                                              F, Sigs, Env, Acc, HasDefault);
+                Error -> Error
+            end;
+        {ok, _Args, Other} -> {error, {expected_case_colon, Other}};
+        Error -> Error
+    end;
 parse_cases([{keyword, 'case'}, {atomprefix, ":"}, {id, Name}, {atomprefix, ":"} | BodyTokens],
             SubjectType, F, Sigs, Env, Acc, HasDefault) ->
     Pattern = {atom, list_to_atom(Name)},
@@ -959,21 +973,80 @@ parse_cases([{keyword, 'case'} | Rest], SubjectType, F, Sigs, Env, Acc, HasDefau
 parse_cases(Other, _SubjectType, _F, _Sigs, _Env, _Acc, _HasDefault) ->
     {error, {expected_case, Other}}.
 
+parse_variant_pattern_args([{rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse(Acc), Rest};
+parse_variant_pattern_args([{keyword, bind}, {id, Name}, {comma, ","} | Rest], Acc) ->
+    parse_variant_pattern_args(Rest, [{bind, Name} | Acc]);
+parse_variant_pattern_args([{keyword, bind}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([{bind, Name} | Acc]), Rest};
+parse_variant_pattern_args([{keyword, '_'}, {comma, ","} | Rest], Acc) ->
+    parse_variant_pattern_args(Rest, [ignore | Acc]);
+parse_variant_pattern_args([{keyword, '_'}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([ignore | Acc]), Rest};
+parse_variant_pattern_args(Other, _Acc) ->
+    {error, {expected_variant_pattern_binding, Other}}.
+
+validate_variant_pattern(EnumName, VariantName, Args, SubjectType, Sigs) ->
+    case SubjectType == {named, EnumName} of
+        false -> {error, {enum_pattern_type_mismatch, SubjectType, EnumName}};
+        true ->
+            case maps:find(EnumName, Sigs) of
+                {ok, #{kind := enum, variants := Variants}} ->
+                    case [Variant || Variant <- Variants,
+                                     maps:get(name, Variant) == VariantName] of
+                        [#{fields := Fields}] when length(Fields) == length(Args) ->
+                            case duplicate_pattern_binding(Args) of
+                                none ->
+                                    Bindings = [variant_pattern_binding(Field, Arg)
+                                                || {Field, Arg} <- lists:zip(Fields, Args)],
+                                    {ok, {variant_pattern, EnumName, VariantName, Bindings}};
+                                Name -> {error, {duplicate_pattern_binding, Name}}
+                            end;
+                        [#{fields := Fields}] ->
+                            {error, {variant_pattern_arity, EnumName, VariantName,
+                                     length(Fields), length(Args)}};
+                        [] -> {error, {unknown_enum_variant, EnumName, VariantName}}
+                    end;
+                _ -> {error, {not_an_enum, EnumName}}
+            end
+    end.
+
+variant_pattern_binding(Field, {bind, Name}) ->
+    Field#{binding => Name};
+variant_pattern_binding(Field, ignore) ->
+    Field#{binding => ignore}.
+
+duplicate_pattern_binding(Args) ->
+    Names = [Name || {bind, Name} <- Args],
+    duplicate_string(Names, []).
+
+duplicate_string([], _Seen) -> none;
+duplicate_string([Name | Rest], Seen) ->
+    case lists:member(Name, Seen) of
+        true -> Name;
+        false -> duplicate_string(Rest, [Name | Seen])
+    end.
+
 parse_case_body_if_unique(Pattern, BodyTokens, SubjectType, F, Sigs, Env, Acc,
                           HasDefault) ->
-    case lists:any(fun(Case) -> maps:get(pattern, Case) == Pattern end, Acc) of
+    Key = pattern_key(Pattern),
+    case lists:any(fun(Case) -> pattern_key(maps:get(pattern, Case)) == Key end, Acc) of
         true -> {error, {duplicate_case, Pattern}};
         false ->
             parse_case_body(Pattern, BodyTokens, SubjectType, F, Sigs, Env, Acc,
                             HasDefault)
     end.
 
+pattern_key({variant_pattern, EnumName, VariantName, _Bindings}) ->
+    {variant_pattern, EnumName, VariantName};
+pattern_key(Pattern) -> Pattern.
+
 parse_case_body(Pattern, Tokens, SubjectType, F, Sigs, Env, Acc, HasDefault) ->
     {Body, Rest} = take_case_body(Tokens, 0, []),
     case Pattern == default andalso Rest =/= [] of
         true -> {error, default_case_must_be_last};
         false ->
-            case parse_statements(Body, F, Sigs, env_child(Env), []) of
+            case parse_statements(Body, F, Sigs, pattern_env(Pattern, Env), []) of
                 {ok, Statements, _} ->
                     Case = #{pattern => Pattern, statements => Statements},
                     parse_cases(Rest, SubjectType, F, Sigs, Env,
@@ -981,6 +1054,14 @@ parse_case_body(Pattern, Tokens, SubjectType, F, Sigs, Env, Acc, HasDefault) ->
                 Error -> Error
             end
     end.
+
+pattern_env({variant_pattern, _EnumName, _VariantName, Bindings}, Env) ->
+    lists:foldl(fun
+        (#{binding := ignore}, Current) -> Current;
+        (#{binding := Name, type := Type}, Current) -> env_put(Name, Type, Current)
+    end, env_child(Env), Bindings);
+pattern_env(_Pattern, Env) ->
+    env_child(Env).
 
 take_case_body([], _Depth, Acc) -> {lists:reverse(Acc), []};
 take_case_body([{keyword, 'case'} | _] = Rest, 0, Acc) ->

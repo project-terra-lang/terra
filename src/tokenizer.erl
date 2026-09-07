@@ -19,6 +19,7 @@ keyword(<<"fn">>)     -> {ok, fn};
 keyword(<<"struct">>) -> {ok, struct};
 keyword(<<"enum">>)   -> {ok, enum};
 keyword(<<"variant">>) -> {ok, variant};
+keyword(<<"bind">>)    -> {ok, bind};
 keyword(<<"return">>) -> {ok, return};
 keyword(<<"try">>)    -> {ok, 'try'};
 keyword(<<"let">>)    -> {ok, 'let'};

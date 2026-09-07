@@ -1,0 +1,13 @@
+enum Pair {
+    variant Both(Int left, Int right);
+}
+
+function Number Main(String Args) {
+    local Pair pair = Pair.Both(1, 2);
+    if pair == {
+        case Pair.Both(bind value, bind value):
+            return value;
+        case:
+            return 0;
+    }
+}

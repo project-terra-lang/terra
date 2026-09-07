@@ -1,0 +1,14 @@
+enum Result {
+    variant Ok(Int value);
+}
+
+function Number Main(String Args) {
+    local Result result = Result.Ok(7);
+    if result == {
+        case Result.Ok(bind value):
+            stdout(value);
+        case:
+            stdout(0);
+    }
+    return value;
+}
