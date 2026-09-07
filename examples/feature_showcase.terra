@@ -56,6 +56,8 @@ function Number Main(String Args) {
   local Atom status = :ready;
   local Bool enabled = true;
 
+  SumTo(69420, 10);
+
   stdout("Variable values:");
   stdout(state);
   stdout(total);
@@ -135,4 +137,5 @@ function Number Main(String Args) {
   stdout('T');
 
   return doubled;
+  -- stdout(""); // this is a bad reporting if the statement shown here is wrong when printing error
 }
