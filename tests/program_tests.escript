@@ -96,6 +96,10 @@ main(_Args) ->
               fun(Result) -> Result =:= {error, {duplicate_global, "shared"}} end},
              {"warnings remain separate from errors", "tests/programs/warnings.terra",
               fun expect_warnings/1},
+             {"restricted map properties", "tests/programs/restricted_map.terra",
+              fun expect_restricted_map/1},
+             {"restricted map capacity", "tests/programs/restricted_map_overflow.terra",
+              fun expect_restricted_map_overflow/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -145,6 +149,20 @@ expect_functions({ok, Program}) ->
     has_multi_binding(MainStatements);
 expect_functions(_) ->
     false.
+
+expect_restricted_map({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    Statements = maps:get(statements, Main),
+    lists:any(fun(Statement) ->
+        maps:get(kind, Statement, none) == variable andalso
+        maps:get(type, Statement, none) == restricted_map
+    end, Statements);
+expect_restricted_map(_) ->
+    false.
+
+expect_restricted_map_overflow({error, {in_function, "Main",
+                                        {restricted_map_capacity_exceeded, 1, 2}}}) -> true;
+expect_restricted_map_overflow(_) -> false.
 
 find_function(Name, Functions) ->
     hd([Function || Function <- Functions, maps:get(name, Function) == Name]).

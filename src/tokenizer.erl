@@ -33,6 +33,7 @@ keyword(<<"Float">>)  -> {ok, float};
 keyword(<<"Atom">>)   -> {ok, atom};
 keyword(<<"Bool">>)   -> {ok, bool};
 keyword(<<"Map">>)    -> {ok, map};
+keyword(<<"RestrictedMap">>) -> {ok, restricted_map};
 keyword(<<"List">>)   -> {ok, list};
 keyword(<<"Tuple">>)  -> {ok, tuple};
 keyword(<<"String">>) -> {ok, string};

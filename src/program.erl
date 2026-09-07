@@ -558,6 +558,7 @@ parse_loop_body(Kind, BodyStart, _Tokens, F, Sigs, Env, LoopEnv, Acc, Fields) ->
 iterable_type(list) -> true;
 iterable_type(tuple) -> true;
 iterable_type(map) -> true;
+iterable_type(restricted_map) -> true;
 iterable_type(string) -> true;
 iterable_type(_) -> false.
 
@@ -1113,6 +1114,8 @@ validate_call(stdout, Args, Sigs, Env) ->
         Error -> Error
     end;
 validate_call(range, Args, Sigs, Env) -> validate_range(Args, Sigs, Env);
+validate_call(restricted_map, Args, Sigs, Env) ->
+    validate_restricted_map(Args, Sigs, Env);
 validate_call(Name, Args, Sigs, Env)
   when Name == number; Name == int; Name == sint; Name == float ->
     validate_numeric_conversion(Name, Args, Sigs, Env);
@@ -1152,6 +1155,33 @@ validate_numeric_conversion(Target, [Arg], Sigs, Env) ->
 validate_numeric_conversion(Target, Args, _Sigs, _Env) ->
     {error, {numeric_conversion_arity, Target, 1, length(Args)}}.
 
+validate_restricted_map([Capacity], Sigs, Env) ->
+    validate_restricted_map_arguments(Capacity, {map, []}, Sigs, Env);
+validate_restricted_map([Capacity, Value], Sigs, Env) ->
+    validate_restricted_map_arguments(Capacity, Value, Sigs, Env);
+validate_restricted_map(Args, _Sigs, _Env) ->
+    {error, {restricted_map_arity, length(Args)}}.
+
+validate_restricted_map_arguments(Capacity, Value, Sigs, Env) ->
+    case {single_type(Capacity, Sigs, Env), single_type(Value, Sigs, Env)} of
+        {{ok, int}, {ok, map}} ->
+            validate_restricted_map_literal(Capacity, Value);
+        {{ok, CapacityType}, {ok, map}} ->
+            {error, {invalid_restricted_map_capacity, CapacityType}};
+        {{ok, int}, {ok, ValueType}} ->
+            {error, {invalid_restricted_map_value, ValueType}};
+        {{error, Reason}, _} -> {error, Reason};
+        {_, {error, Reason}} -> {error, Reason};
+        {{ok, CapacityType}, {ok, _ValueType}} ->
+            {error, {invalid_restricted_map_capacity, CapacityType}}
+    end.
+
+validate_restricted_map_literal({int, Capacity}, {map, Pairs})
+  when length(Pairs) > Capacity ->
+    {error, {restricted_map_capacity_exceeded, Capacity, length(Pairs)}};
+validate_restricted_map_literal(_Capacity, _Value) ->
+    {ok, [restricted_map]}.
+
 expression_types([], _Sigs, _Env, Acc) -> {ok, lists:reverse(Acc)};
 expression_types([Expr | Rest], Sigs, Env, Acc) ->
     case infer_types(Expr, Sigs, Env) of
@@ -1177,8 +1207,13 @@ infer_types({atom, _}, _Sigs, _Env) -> {ok, [atom]};
 infer_types({list, _}, _Sigs, _Env) -> {ok, [list]};
 infer_types({tuple, _}, _Sigs, _Env) -> {ok, [tuple]};
 infer_types({map, _}, _Sigs, _Env) -> {ok, [map]};
-infer_types({member, Value, _Name}, Sigs, Env) ->
+infer_types({member, Value, Name}, Sigs, Env) ->
     case single_type(Value, Sigs, Env) of
+        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "count" ->
+            {ok, [int]};
+        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "members" ->
+            {ok, [list]};
+        {ok, Type} when Type == map; Type == restricted_map -> {ok, [var]};
         {ok, _Type} -> {ok, [var]};
         Error -> Error
     end;

@@ -238,7 +238,7 @@ parse_primary([{id, Name}, {lparen, "("} | Rest]) ->
 parse_primary([{keyword, Name}, {lparen, "("} | Rest]) ->
     parse_call(Name, Rest);
 parse_primary([{id, Name} | Rest]) ->
-    {ok, {var_ref, Name}, Rest};
+    parse_members({var_ref, Name}, Rest);
 parse_primary([{lbracket, "["} | Rest]) ->
     parse_sequence(Rest, rbracket, list, []);
 parse_primary([{lparen, "("} | Rest]) ->
@@ -247,6 +247,11 @@ parse_primary([{hash, "#"}, {lparen, "("} | Rest]) ->
     parse_map(Rest, []);
 parse_primary(Other) ->
     {error, {expected_expression, Other}}.
+
+parse_members(Value, [{dot, "."}, {id, Name} | Rest]) ->
+    parse_members({member, Value, Name}, Rest);
+parse_members(Value, Rest) ->
+    {ok, Value, Rest}.
 
 parse_group_or_tuple(Tokens) ->
     case parse_expr(Tokens) of
@@ -582,6 +587,16 @@ infer_type({map, Pairs}, Env) ->
         ok -> {ok, map};
         {error, Reason} -> {error, Reason}
     end;
+infer_type({member, Value, Name}, Env) ->
+    case infer_type(Value, Env) of
+        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "count" ->
+            {ok, int};
+        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "members" ->
+            {ok, list};
+        {ok, Type} when Type == map; Type == restricted_map -> {ok, var};
+        {ok, _Type} -> {ok, var};
+        Error -> Error
+    end;
 infer_type({binary, Op, Left, Right}, Env) ->
     case {infer_type(Left, Env), infer_type(Right, Env)} of
         {{ok, LeftType}, {ok, RightType}} -> infer_binary_type(Op, LeftType, RightType);
@@ -601,6 +616,8 @@ infer_type({call, state, Args}, Env) ->
 infer_type({call, Name, Args}, Env)
   when Name == number; Name == int; Name == sint; Name == float ->
     infer_numeric_conversion(Name, Args, Env);
+infer_type({call, restricted_map, Args}, Env) ->
+    infer_restricted_map(Args, Env);
 infer_type({call, Name, Args}, Env) ->
     case infer_type_list(Args, Env) of
         ok -> {ok, {call, Name}};
@@ -614,6 +631,28 @@ infer_type({var_ref, Name}, Env) ->
     end;
 infer_type(_Value, _Env) ->
     {error, unknown_type}.
+
+infer_restricted_map([Capacity], Env) ->
+    infer_restricted_map([Capacity, {map, []}], Env);
+infer_restricted_map([Capacity, Value], Env) ->
+    case {infer_type(Capacity, Env), infer_type(Value, Env)} of
+        {{ok, int}, {ok, map}} ->
+            case {Capacity, Value} of
+                {{int, Limit}, {map, Pairs}} when length(Pairs) > Limit ->
+                    {error, {restricted_map_capacity_exceeded, Limit, length(Pairs)}};
+                _ -> {ok, restricted_map}
+            end;
+        {{ok, CapacityType}, {ok, map}} ->
+            {error, {invalid_restricted_map_capacity, CapacityType}};
+        {{ok, int}, {ok, ValueType}} ->
+            {error, {invalid_restricted_map_value, ValueType}};
+        {{error, Reason}, _} -> {error, Reason};
+        {_, {error, Reason}} -> {error, Reason};
+        {{ok, CapacityType}, {ok, _ValueType}} ->
+            {error, {invalid_restricted_map_capacity, CapacityType}}
+    end;
+infer_restricted_map(Args, _Env) ->
+    {error, {restricted_map_arity, length(Args)}}.
 
 infer_type_list([], _Env) ->
     ok;
@@ -772,6 +811,14 @@ describe_type(map, {map, Pairs}, Env) ->
     Keys = [Key || {Key, _Value} <- Pairs],
     Values = [Value || {_Key, Value} <- Pairs],
     #{kind => map, key_types => unique_types(Keys, Env), value_types => unique_types(Values, Env)};
+describe_type(restricted_map, {call, restricted_map, [{int, Capacity}, {map, Pairs}]}, Env) ->
+    Keys = [Key || {Key, _Value} <- Pairs],
+    Values = [Value || {_Key, Value} <- Pairs],
+    #{kind => restricted_map, capacity => Capacity, count => length(Pairs),
+      key_types => unique_types(Keys, Env), value_types => unique_types(Values, Env)};
+describe_type(restricted_map, {call, restricted_map, [{int, Capacity}]}, _Env) ->
+    #{kind => restricted_map, capacity => Capacity, count => 0,
+      key_types => [], value_types => []};
 describe_type(Type, _Value, _Env) ->
     datatypes:type_info(Type).
 

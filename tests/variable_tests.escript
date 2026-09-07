@@ -15,6 +15,8 @@ main(_Args) ->
 cases() ->
     [{"basic variables", "tests/variables/basic_variables.terra", fun expect_basic/1},
      {"data type metadata", "tests/variables/data_types.terra", fun expect_data_types/1},
+     {"restricted map metadata and properties", "tests/variables/restricted_map.terra",
+      fun expect_restricted_map/1},
      {"signed integer", "tests/variables/sint.terra", fun expect_sint/1},
      {"immutable reassignment", "tests/variables/immutable_reassign.terra",
       fun(Result) ->
@@ -93,6 +95,17 @@ expect_data_types({ok, Vars}) ->
     has_type_info("pair", #{kind => tuple, item_types => [int, string], size => 2}, Vars) andalso
     has_type_info("lookup", #{kind => map, key_types => [atom], value_types => [number]}, Vars);
 expect_data_types(_) ->
+    false.
+
+expect_restricted_map({ok, Vars}) ->
+    has_type_info("limited",
+                  #{kind => restricted_map, capacity => 3, count => 2,
+                    key_types => [atom], value_types => [int]}, Vars) andalso
+    has_var("limited_count", int, {member, {var_ref, "limited"}, "count"}, Vars) andalso
+    has_var("limited_members", list, {member, {var_ref, "limited"}, "members"}, Vars) andalso
+    has_var("normal_count", int, {member, {var_ref, "normal"}, "count"}, Vars) andalso
+    has_var("normal_members", list, {member, {var_ref, "normal"}, "members"}, Vars);
+expect_restricted_map(_) ->
     false.
 
 expect_sint({ok, Vars}) ->

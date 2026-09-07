@@ -24,6 +24,7 @@ Atom
 Bool
 
 Map
+RestrictedMap
 List
 Tuple
 
@@ -52,6 +53,11 @@ temp Var zss = Var();
 processes running the generated module. `thread_local` values initialize once
 per BEAM process. `atomic` stores `Int` or `SInt` values in a BEAM atomic cell,
 and `computed` reevaluates its expression whenever the binding is read.
+
+`RestrictedMap(capacity, map)` creates an immutable map whose initial member
+count cannot exceed its non-negative integer capacity; `RestrictedMap(capacity)`
+creates an empty bounded map. Both `Map` and `RestrictedMap` expose `.count`
+for their member count and `.members` for a list of key/value tuples.
 
 2. Functions
 - Functions support multiple Return Values
@@ -126,7 +132,7 @@ if x == {
 ```
 
 4. Loops
-- `for_each` accepts `List`, `Tuple`, `Map`, and `String` values.
+- `for_each` accepts `List`, `Tuple`, `Map`, `RestrictedMap`, and `String` values.
 - Loop conditions and bodies receive an implicit `it` counter variable.
 - Recursive calls use the normal function-call syntax and are type checked.
 ```lua

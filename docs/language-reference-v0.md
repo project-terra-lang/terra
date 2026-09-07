@@ -53,7 +53,7 @@ as Erlang-compatible integer character values.
 The current built-in types are:
 
 ```text
-Number Int SInt Float Atom Bool Map List Tuple String State Var
+Number Int SInt Float Atom Bool Map RestrictedMap List Tuple String State Var
 ```
 
 `Number` accepts `Int`, `SInt`, and `Float` values. `Var` asks the compiler to
@@ -245,6 +245,20 @@ false
 #(:name => "Terra", :version => 1)
 ```
 
+Bounded maps use a constructor with a non-negative `Int` capacity and an
+optional initial `Map`:
+
+```terra
+RestrictedMap(4)
+RestrictedMap(4, #(:name => "Terra", :version => 1))
+```
+
+The initializer must not contain more members than the declared capacity.
+Terra maps are immutable, so the capacity bounds construction rather than a
+later mutation operation. `value.count` returns an `Int` member count and
+`value.members` returns a `List` of key/value tuples for both `Map` and
+`RestrictedMap`. Other member names continue to perform ordinary key lookup.
+
 Function and constructor-style calls use parentheses:
 
 ```terra
@@ -253,7 +267,8 @@ List()
 State()
 ```
 
-Member access chains use dots and currently infer to `Var`:
+Member access chains use dots. Map `.count` and `.members` have the concrete
+types described above; ordinary key access currently infers to `Var`:
 
 ```terra
 profile.name
@@ -347,7 +362,8 @@ must be last. Duplicate case patterns are rejected.
 
 ### Loops
 
-`for_each` iterates over `List`, `Tuple`, `Map`, and `String` values. The body
+`for_each` iterates over `List`, `Tuple`, `Map`, `RestrictedMap`, and `String`
+values. The body
 receives the named binding and an implicit `it` counter.
 
 ```terra
@@ -442,9 +458,11 @@ primary         = literal
                 | member
                 | list
                 | tuple_or_group
-                | map ;
+                | map
+                | restricted_map ;
 
 call            = identifier, "(", [ expr, { ",", expr } ], ")" ;
+restricted_map  = "RestrictedMap", "(", expr, [ ",", expr ], ")" ;
 member          = identifier, ".", identifier, { ".", identifier } ;
 list            = "[", [ expr, { ",", expr } ], "]" ;
 tuple_or_group  = "(", expr, [ ",", expr, { ",", expr } ], ")" ;

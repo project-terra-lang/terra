@@ -10,6 +10,7 @@ main(_Args) ->
                test_once_semantics(OutDir), test_once_failure(OutDir),
                test_once_reentrancy(OutDir),
                test_storage_semantics(OutDir), test_computed_deferred(OutDir),
+               test_restricted_map(OutDir),
                test_source_map(OutDir),
                test_showcase_compile(OutDir)],
     case lists:member(fail, Results) of
@@ -247,6 +248,17 @@ test_computed_deferred(OutDir) ->
             expect("computed initializer is deferred", true);
         Other ->
             io:format("not ok - computed initializer is deferred~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_restricted_map(OutDir) ->
+    Path = "tests/programs/restricted_map.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_restricted_map, 4, _BeamPath, _ErlangPath} ->
+            expect("restricted and ordinary map properties", true);
+        Other ->
+            io:format("not ok - restricted and ordinary map properties~n  got: ~p~n",
+                      [Other]),
             fail
     end.
 

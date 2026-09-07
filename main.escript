@@ -91,6 +91,7 @@ display_type(float)  -> "Float";
 display_type(atom)   -> "Atom";
 display_type(bool)   -> "Bool";
 display_type(map)    -> "Map";
+display_type(restricted_map) -> "RestrictedMap";
 display_type(list)   -> "List";
 display_type(tuple)  -> "Tuple";
 display_type(string) -> "String";

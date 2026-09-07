@@ -403,6 +403,11 @@ function_call(tuple, Args, Env) ->
 function_call(list, Args, Env) ->
     ["[", lists:join(", ", [expression(Arg, Env) || Arg <- Args]), "]"];
 function_call(map, [], _Env) -> "#{}";
+function_call(restricted_map, [Capacity], Env) ->
+    ["terra_restricted_map(", expression(Capacity, Env), ", #{})"];
+function_call(restricted_map, [Capacity, Value], Env) ->
+    ["terra_restricted_map(", expression(Capacity, Env), ", ",
+     expression(Value, Env), ")"];
 function_call(state, [], _Env) -> "#{}";
 function_call(string, [Arg], Env) ->
     ["unicode:characters_to_binary(", expression(Arg, Env), ")"];
@@ -434,6 +439,7 @@ default_type(atom) -> "undefined";
 default_type(list) -> "[]";
 default_type(tuple) -> "{}";
 default_type(map) -> "#{}";
+default_type(restricted_map) -> "{terra_restricted_map, 0, #{}}";
 default_type(_) -> "undefined".
 
 operator(plus) -> "+";
@@ -561,6 +567,7 @@ runtime_helpers() ->
     "    Items = terra_iterable(Value),\n"
     "    Indexed = lists:zip(Items, lists:seq(0, length(Items) - 1)),\n"
     "    lists:foreach(fun({Item, Index}) -> Fun(Item, Index) end, Indexed).\n\n"
+    "terra_iterable({terra_restricted_map, _Capacity, Value}) -> maps:to_list(Value);\n"
     "terra_iterable(Value) when is_list(Value) -> Value;\n"
     "terra_iterable(Value) when is_tuple(Value) -> tuple_to_list(Value);\n"
     "terra_iterable(Value) when is_map(Value) -> maps:to_list(Value);\n"
@@ -578,5 +585,15 @@ runtime_helpers() ->
     "        true -> terra_do_while(Condition, Body, It + 1);\n"
     "        false -> ok\n"
     "    end.\n\n"
+    "terra_restricted_map(Capacity, Value)\n"
+    "  when is_integer(Capacity), Capacity >= 0, is_map(Value), map_size(Value) =< Capacity ->\n"
+    "    {terra_restricted_map, Capacity, Value};\n"
+    "terra_restricted_map(Capacity, Value) ->\n"
+    "    erlang:error({invalid_restricted_map, Capacity, Value}).\n\n"
+    "terra_member({terra_restricted_map, _Capacity, Value}, count) -> map_size(Value);\n"
+    "terra_member({terra_restricted_map, _Capacity, Value}, members) -> maps:to_list(Value);\n"
+    "terra_member({terra_restricted_map, _Capacity, Value}, Key) -> maps:get(Key, Value);\n"
+    "terra_member(Value, count) when is_map(Value) -> map_size(Value);\n"
+    "terra_member(Value, members) when is_map(Value) -> maps:to_list(Value);\n"
     "terra_member(Value, Key) when is_map(Value) -> maps:get(Key, Value);\n"
     "terra_member(Value, Key) -> erlang:error({cannot_access_member, Key, Value}).\n".

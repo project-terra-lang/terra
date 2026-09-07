@@ -1,0 +1,4 @@
+function Number Main(String Args) {
+    local RestrictedMap limited = RestrictedMap(1, #(:first => 1, :second => 2));
+    return limited.count;
+}

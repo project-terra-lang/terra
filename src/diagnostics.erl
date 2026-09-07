@@ -127,6 +127,26 @@ format({numeric_conversion_arity, Target, Expected, Actual}) ->
      io_lib:format("~s conversion expects ~p argument, but received ~p.",
                    [type_name(Target), Expected, Actual]),
      "Pass exactly one numeric value to the conversion."};
+format({restricted_map_arity, Actual}) ->
+    {restricted_map_arity,
+     io_lib:format("RestrictedMap expects one or two arguments, but received ~p.",
+                   [Actual]),
+     "Use RestrictedMap(capacity) or RestrictedMap(capacity, map)."};
+format({invalid_restricted_map_capacity, Type}) ->
+    {invalid_restricted_map_capacity,
+     io_lib:format("RestrictedMap capacity must be Int, but received ~s.",
+                   [type_name(Type)]),
+     "Pass a non-negative integer capacity as the first argument."};
+format({invalid_restricted_map_value, Type}) ->
+    {invalid_restricted_map_value,
+     io_lib:format("RestrictedMap contents must be Map, but received ~s.",
+                   [type_name(Type)]),
+     "Pass a map literal or Map value as the second argument."};
+format({restricted_map_capacity_exceeded, Capacity, Count}) ->
+    {restricted_map_capacity_exceeded,
+     io_lib:format("RestrictedMap capacity is ~p, but its initializer has ~p members.",
+                   [Capacity, Count]),
+     "Increase the capacity or remove members from the initializer."};
 format(null_not_allowed) ->
     {null_not_allowed,
      "null and nil are not valid variable values.",
@@ -638,6 +658,7 @@ type_name(float) -> "Float";
 type_name(atom) -> "Atom";
 type_name(bool) -> "Bool";
 type_name(map) -> "Map";
+type_name(restricted_map) -> "RestrictedMap";
 type_name(list) -> "List";
 type_name(tuple) -> "Tuple";
 type_name(string) -> "String";
