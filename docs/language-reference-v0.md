@@ -73,6 +73,8 @@ explicitly signed source values, including negative literals, but neither type
 is a statically checked numeric range. Integer arithmetic therefore does not
 wrap or overflow. `Float` uses the BEAM floating-point representation; its
 precision and exceptional arithmetic behavior follow the Erlang runtime.
+Because `SInt` is not a narrower runtime range, ordinary `Int` values may be
+used where `SInt` is expected.
 
 For `+` and `*`, mixed operands promote in this order: `Float`, `SInt`, `Int`.
 Same-type integer arithmetic preserves its type; mixed subtraction follows the

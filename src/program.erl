@@ -1158,7 +1158,7 @@ parse_mul(Tokens, Sigs, Env) ->
     end.
 
 parse_mul_rest(Left, [{Op, _} | Rest], Sigs, Env) when Op == times; Op == div_op ->
-    case parse_primary(Rest, Sigs, Env) of
+    case parse_unary(Rest, Sigs, Env) of
         {ok, Right, Remaining} ->
             parse_mul_rest({binary, Op, Left, Right}, Remaining, Sigs, Env);
         Error -> Error
@@ -1475,6 +1475,7 @@ types_accept(_, _) -> false.
 type_accepts(number, int) -> true;
 type_accepts(number, sint) -> true;
 type_accepts(number, float) -> true;
+type_accepts(sint, int) -> true;
 type_accepts(Type, Type) -> true;
 type_accepts(_, _) -> false.
 

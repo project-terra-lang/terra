@@ -1,5 +1,6 @@
 function Number Main(String Args) {
 local SInt debt = -5;
+local SInt count = 5;
 local Number score = debt;
 return 0;
 }

@@ -1,0 +1,7 @@
+function SInt Echo(SInt value) {
+    return value;
+}
+
+function Number Main(String Args) {
+    return Echo(1000);
+}

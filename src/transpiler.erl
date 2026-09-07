@@ -302,10 +302,13 @@ generate_statement(#{kind := unless, condition := Condition,
     {Code, Env, Counter2};
 generate_statement(#{kind := switch, subject := Subject, cases := Cases},
                    Env, Counter, Level, FunctionName) ->
-    {Clauses, NextCounter} = generate_cases(Cases, Env, Counter, Level + 1,
-                                            FunctionName, []),
-    {[indent(Level), "case ", expression(Subject, Env), " of\n",
-      lists:join(";\n", Clauses), "\n", indent(Level), "end"],
+    SubjectName = variable_name("switch_subject", Counter),
+    {SwitchCode, NextCounter} =
+        generate_switch_cases(Cases, SubjectName, Env, Counter + 1,
+                              Level + 1, FunctionName),
+    {[indent(Level), "begin\n",
+      indent(Level + 1), SubjectName, " = ", expression(Subject, Env), ",\n",
+      SwitchCode, "\n", indent(Level), "end"],
      Env, NextCounter};
 generate_statement(#{kind := for_each, binding := Binding, iterable := Iterable,
                      statements := Statements}, Env, Counter, Level, FunctionName) ->
@@ -372,18 +375,25 @@ generate_optional_block(Statements, Env, Counter, Level, FunctionName) ->
         generate_statements(Statements, Env, Counter, Level, FunctionName),
     {block(Body, Level), NextCounter}.
 
-generate_cases([], _Env, Counter, _Level, _FunctionName, Acc) ->
-    {lists:reverse(Acc), Counter};
-generate_cases([Case | Rest], Env, Counter, Level, FunctionName, Acc) ->
+generate_switch_cases([], _SubjectName, _Env, Counter, Level, _FunctionName) ->
+    {[indent(Level), "ok"], Counter};
+generate_switch_cases([#{pattern := default, statements := Statements}],
+                      _SubjectName, Env, Counter, Level, FunctionName) ->
     {Body, _BodyEnv, NextCounter} =
-        generate_statements(maps:get(statements, Case), Env, Counter,
-                            Level + 1, FunctionName),
-    Pattern = case maps:get(pattern, Case) of
-                  default -> "_";
-                  Value -> expression(Value, Env)
-              end,
-    Clause = [indent(Level), Pattern, " ->\n", block(Body, Level + 1)],
-    generate_cases(Rest, Env, NextCounter, Level, FunctionName, [Clause | Acc]).
+        generate_statements(Statements, Env, Counter, Level, FunctionName),
+    {block(Body, Level), NextCounter};
+generate_switch_cases([#{pattern := Pattern, statements := Statements} | Rest],
+                      SubjectName, Env, Counter, Level, FunctionName) ->
+    {Body, _BodyEnv, Counter1} =
+        generate_statements(Statements, Env, Counter, Level + 2, FunctionName),
+    {Fallback, NextCounter} =
+        generate_switch_cases(Rest, SubjectName, Env, Counter1,
+                              Level + 2, FunctionName),
+    Code = [indent(Level), "case ", expression(Pattern, Env), " of\n",
+            indent(Level + 1), SubjectName, " ->\n", block(Body, Level + 2),
+            ";\n", indent(Level + 1), "_ ->\n", Fallback, "\n",
+            indent(Level), "end"],
+    {Code, NextCounter}.
 
 bind_result_names([], Counter, Env, Acc) ->
     {lists:reverse(Acc), Env, Counter};

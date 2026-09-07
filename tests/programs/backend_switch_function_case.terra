@@ -1,0 +1,16 @@
+function SInt Target() {
+    return -100;
+}
+
+function SInt Match(SInt value) {
+    if value == {
+        case Target():
+            return Target();
+        case:
+            return 0;
+    }
+}
+
+function Number Main(String Args) {
+    return Match(-100);
+}

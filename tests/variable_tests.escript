@@ -110,6 +110,7 @@ expect_restricted_map(_) ->
 
 expect_sint({ok, Vars}) ->
     has_var("debt", sint, {sint, -5}, Vars) andalso
+    has_var("count", sint, {int, 5}, Vars) andalso
     has_var("score", number, {var_ref, "debt"}, Vars);
 expect_sint(_) ->
     false.
@@ -172,6 +173,7 @@ expect_boolean_operators(_) ->
 
 expect_numeric_rules({ok, Vars}) ->
     has_eval("difference", int, {int, -3}, const, direct, Vars) andalso
+    has_eval("product", sint, {sint, -6}, const, direct, Vars) andalso
     has_eval("ratio", float, {float, 2.5}, const, direct, Vars) andalso
     has_eval("mixed", float, {float, 3.5}, const, direct, Vars) andalso
     has_eval("comparison", bool, {bool, true}, const, direct, Vars) andalso

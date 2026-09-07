@@ -15,6 +15,7 @@ main(_Args) ->
                test_once_reentrancy(OutDir),
                test_storage_semantics(OutDir), test_computed_deferred(OutDir),
                test_restricted_map(OutDir),
+               test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_source_map(OutDir),
                test_showcase_compile(OutDir)],
@@ -335,6 +336,17 @@ test_restricted_map(OutDir) ->
             expect("restricted and ordinary map properties", true);
         Other ->
             io:format("not ok - restricted and ordinary map properties~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_switch_function_case(OutDir) ->
+    Path = "tests/programs/backend_switch_function_case.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_backend_switch_function_case, -100, _BeamPath, _ErlangPath} ->
+            expect("switch supports function-call cases", true);
+        Other ->
+            io:format("not ok - switch supports function-call cases~n  got: ~p~n",
                       [Other]),
             fail
     end.

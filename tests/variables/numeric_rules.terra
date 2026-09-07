@@ -1,5 +1,6 @@
 function Number Main(String Args) {
     local const Int difference = 2 - 5;
+    local const SInt product = 2 * -3;
     local const Float ratio = 5 / 2;
     local const Float mixed = 1 + 2.5;
     local const Bool comparison = 2 < 2.5;

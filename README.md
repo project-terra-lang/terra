@@ -32,9 +32,11 @@ String
 ```
 
 Integers use BEAM arbitrary-precision arithmetic, so integer operations do not
-overflow. Mixed numeric arithmetic promotes to `Float`, then `SInt`, then
-`Int`; same-type integer arithmetic preserves its type, and `/` always produces
-`Float`. Numeric constructors provide explicit conversions.
+overflow. `SInt` can accept ordinary integer values because it is a source-level
+signed intent, not a separate runtime range. Mixed numeric arithmetic promotes
+to `Float`, then `SInt`, then `Int`; same-type integer arithmetic preserves its
+type, and `/` always produces `Float`. Numeric constructors provide explicit
+conversions.
 
 1. Variables
 - All Variables are Immutable

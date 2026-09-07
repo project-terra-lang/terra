@@ -80,6 +80,8 @@ main(_Args) ->
               fun expect_expression_precedence/1},
              {"numeric rules", "tests/programs/numeric_rules.terra",
               fun(Result) -> element(1, Result) =:= ok end},
+             {"SInt accepts Int values", "tests/programs/sint_accepts_int.terra",
+              fun(Result) -> element(1, Result) =:= ok end},
              {"invalid numeric conversion", "tests/programs/numeric_bad_conversion.terra",
               fun expect_invalid_numeric_conversion/1},
              {"once-only calls require zero arguments",

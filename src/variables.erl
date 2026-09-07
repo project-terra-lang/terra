@@ -213,7 +213,7 @@ parse_mul(Tokens) ->
     end.
 
 parse_mul_rest(Left, [{Op, _Text} | Rest]) when Op == times; Op == div_op ->
-    case parse_primary(Rest) of
+    case parse_unary(Rest) of
         {ok, Right, Remaining} ->
             parse_mul_rest({binary, Op, Left, Right}, Remaining);
         {error, Reason} ->
@@ -711,6 +711,7 @@ infer_type_pairs([{Key, Value} | Rest], Env) ->
 type_accepts(number, int)   -> true;
 type_accepts(number, sint)  -> true;
 type_accepts(number, float) -> true;
+type_accepts(sint, int)     -> true;
 type_accepts(Type, Type)    -> true;
 type_accepts(_Type, _ValueType) -> false.
 

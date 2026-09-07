@@ -1,25 +1,22 @@
-function SInt OpenCalculus(SInt Range) 
-{
+function SInt StopAt() {
+    return -100;
+}
+
+function SInt OpenCalculus(SInt Range) {
     local SInt number = Range;
-    // bug with SInt (below code fails)
-    // return 0;
 
     if number == {
-        case -0:
-            return -0;
+        case StopAt():
+            local SInt value = StopAt();
+            return value;
         case -100:
             return -100;
         case:
-            OpenCalculus(Range - 1);
+            return OpenCalculus(Range - 1);
     }
-
-    return number;
 }
 
-
-
 function Number Main(String Args) {
-    //try OpenCalculus(1000); invalid bug this should be a valid SInt
-    stdout(try OpenCalculus(-1+1000));
+    stdout(try OpenCalculus(1000));
     return 69420;
 }
