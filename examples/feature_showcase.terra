@@ -1,6 +1,9 @@
 -- Terra feature showcase
 -- Run with: ./run.sh run examples/feature_showcase.terra hello from terra
 
+const Int showcase_base = 4;
+global String showcase_name = "Terra";
+
 function Int Factorial(Int n) {
   if n <= 1 {
     return 1;
@@ -30,6 +33,10 @@ function Number Banner() {
   return 1;
 }
 
+function Int Increment(Int value) {
+  return value + 1;
+}
+
 function Number Main(String Args) {
   -- Fixed entry point and command-line arguments.
   stdout("Main received:");
@@ -45,7 +52,7 @@ function Number Main(String Args) {
 
   -- Variable scopes, evaluation modes, and concurrency markers.
   global State state = State();
-  local const Int base = 4;
+  local const Int base = showcase_base;
   local computed Int total = base + 3;
   local lazy Number delayed = Factorial(4);
   local atomic Int counter = 1;
@@ -68,21 +75,28 @@ function Number Main(String Args) {
   stdout(ratio);
   stdout(debt);
   stdout(status);
+  stdout(showcase_name);
 
   -- Lists, tuples, maps, member access, and destructuring.
   local List names = ["Ada", "Grace", "Joe"];
   local Tuple identity = (42, "pilot");
   local Map profile = #(:name => "Terra", :version => 1);
+  local RestrictedMap limited_profile = RestrictedMap(3, profile);
   local (Int id, String role) = identity;
 
   stdout(profile.name);
+  stdout(profile.count);
+  stdout(limited_profile.members);
   stdout(id);
   stdout(role);
 
   -- Multiple function return values assigned to typed variables.
   local String category, Number doubled = Analyze(total);
+  local Int piped = 5 |> Increment() |> Increment();
+  local Int checked = try Increment(piped);
   stdout(category);
   stdout(doubled);
+  stdout(checked);
 
   -- if / elseif / else.
   if total > 10 {
@@ -108,6 +122,14 @@ function Number Main(String Args) {
       stdout("switch selected medium");
     case:
       stdout("switch selected the default");
+  }
+
+  -- Case expressions may call functions and are checked in source order.
+  if total == {
+    case Increment(6):
+      stdout("switch matched a function result");
+    case:
+      stdout("switch used its default");
   }
 
   -- Iterate over a collection with a named item and implicit it index.

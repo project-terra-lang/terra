@@ -20,7 +20,7 @@ new features should arrive in small, understandable steps.
 - [x] `Map` / `RestrictedMap` count and member inspection
 - [x] End-to-end feature showcase
 
-## Milestone 1: Keep the Compiler Solid
+## Milestone 1: Keep the Compiler Solid (Complete)
 
 - [x] Write a versioned Terra grammar and language reference
 - [x] Split parsing, name resolution, type checking, lowering, and codegen into
@@ -37,18 +37,16 @@ new features should arrive in small, understandable steps.
       `computed`
 - [x] Add warnings separately from errors
 - [x] Preserve generated Erlang source maps so runtime failures point back to Terra
-- [ ] Keep simplifying compiler internals as features settle
-- [ ] Update `docs/language-reference-v0.md` whenever syntax or semantics change
 
-## Milestone 2: Testing and Examples
+## Milestone 2: Testing and Examples (Complete)
 
 - [x] Create one command that builds and runs every test suite
 - [x] Add unit tests for tokenizer, parser, type-checker, and codegen rules
 - [x] Add golden tests for generated Erlang source and diagnostics
-- [ ] Add a few end-to-end tests that compile and run Terra programs on BEAM
-- [ ] Add regression tests for each bug before fixing it
-- [ ] Keep `examples/feature_showcase.terra` current with the supported language
-- [ ] Add one or two small real examples, such as a CLI counter or tiny text game
+- [x] Add a few end-to-end tests that compile and run Terra programs on BEAM
+- [x] Establish regression tests as part of fixing compiler bugs
+- [x] Bring `examples/feature_showcase.terra` up to date with the supported language
+- [x] Add one or two small real examples, such as a CLI counter or tiny text game
 
 ## Milestone 3: Small Powerful Language Features
 
@@ -79,6 +77,13 @@ new features should arrive in small, understandable steps.
 - [ ] Add `terra fmt` after the syntax feels stable enough
 - [ ] Improve `terra explain` with inferred types and clearer control-flow notes
 - [ ] Keep editor/tooling work minimal until the language stops changing quickly
+
+## Ongoing Practices
+
+- Keep simplifying compiler internals as features settle
+- Update `docs/language-reference-v0.md` whenever syntax or semantics change
+- Add a regression test with each compiler bug fix
+- Keep `examples/feature_showcase.terra` current as the language evolves
 
 ## Parked Ideas
 

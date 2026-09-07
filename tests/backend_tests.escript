@@ -18,7 +18,7 @@ main(_Args) ->
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_source_map(OutDir),
-               test_showcase_compile(OutDir)],
+               test_showcase_run(OutDir), test_counter_example(OutDir)],
     case lists:member(fail, Results) of
         true ->
             io:format("backend tests failed~n"),
@@ -97,13 +97,23 @@ test_run(Path, OutDir) ->
             fail
     end.
 
-test_showcase_compile(OutDir) ->
+test_showcase_run(OutDir) ->
     Path = "examples/feature_showcase.terra",
-    case transpiler:compile_file(Path, OutDir) of
-        {ok, terra_feature_showcase, BeamPath, _ErlangPath} ->
-            expect("compile feature showcase", filelib:is_file(BeamPath));
+    case transpiler:run_file(Path, "milestone two", OutDir) of
+        {ok, terra_feature_showcase, 14, _BeamPath, _ErlangPath} ->
+            expect("run feature showcase on BEAM", true);
         Other ->
-            io:format("not ok - compile feature showcase~n  got: ~p~n", [Other]),
+            io:format("not ok - run feature showcase on BEAM~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_counter_example(OutDir) ->
+    Path = "examples/counter.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_counter, 5, _BeamPath, _ErlangPath} ->
+            expect("run counter example on BEAM", true);
+        Other ->
+            io:format("not ok - run counter example on BEAM~n  got: ~p~n", [Other]),
             fail
     end.
 

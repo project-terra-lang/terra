@@ -204,3 +204,8 @@ Try the complete feature showcase:
 ./run.sh emit examples/feature_showcase.terra
 ./run.sh run examples/feature_showcase.terra hello from terra
 ```
+
+Or run the smaller tail-recursive counter example:
+```bash
+./run.sh run examples/counter.terra
+```

@@ -1,0 +1,17 @@
+-- A small tail-recursive command-line counter.
+-- Run with: ./run.sh run examples/counter.terra
+
+function Int CountUp(Int current, Int limit) {
+    if current > limit {
+        return current - 1;
+    }
+
+    stdout(current);
+    return CountUp(current + 1, limit);
+}
+
+function Number Main(String Args) {
+    stdout("Terra counter");
+    stdout(Args);
+    return CountUp(1, 5);
+}
