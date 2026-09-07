@@ -81,9 +81,17 @@ main(_Args) ->
              {"numeric rules", "tests/programs/numeric_rules.terra",
               fun(Result) -> element(1, Result) =:= ok end},
              {"SInt accepts Int values", "tests/programs/sint_accepts_int.terra",
-              fun(Result) -> element(1, Result) =:= ok end},
+             fun(Result) -> element(1, Result) =:= ok end},
              {"invalid numeric conversion", "tests/programs/numeric_bad_conversion.terra",
               fun expect_invalid_numeric_conversion/1},
+             {"conversion helpers", "tests/programs/conversions.terra",
+              fun expect_conversions/1},
+             {"conversion helper argument type",
+              "tests/programs/conversion_bad_argument.terra",
+              fun expect_conversion_bad_argument/1},
+             {"conversion helper scalar type",
+              "tests/programs/conversion_bad_to_string.terra",
+              fun expect_conversion_bad_to_string/1},
              {"once-only calls require zero arguments",
               "tests/programs/once_requires_zero_args.terra",
               fun expect_once_requires_zero_args/1},
@@ -102,6 +110,12 @@ main(_Args) ->
               fun expect_restricted_map/1},
              {"restricted map capacity", "tests/programs/restricted_map_overflow.terra",
               fun expect_restricted_map_overflow/1},
+             {"immutable updates", "tests/programs/immutable_updates.terra",
+              fun expect_immutable_updates/1},
+             {"record update field names", "tests/programs/record_update_bad_field.terra",
+              fun expect_record_update_bad_field/1},
+             {"record update field types", "tests/programs/record_update_bad_type.terra",
+              fun expect_record_update_bad_type/1},
              {"user-defined records", "tests/programs/records.terra",
               fun expect_records/1},
              {"record constructor types", "tests/programs/record_bad_constructor.terra",
@@ -214,6 +228,32 @@ expect_restricted_map(_) ->
 expect_restricted_map_overflow({error, {in_function, "Main",
                                         {restricted_map_capacity_exceeded, 1, 2}}}) -> true;
 expect_restricted_map_overflow(_) -> false.
+
+expect_immutable_updates({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    Statements = maps:get(statements, Main),
+    lists:any(fun(Statement) ->
+        maps:get(kind, Statement, none) == variable andalso
+        maps:get(name, Statement, none) == "updated_player" andalso
+        maps:get(value, Statement, none) ==
+            {update, {var_ref, "player"}, [{{field, "score"}, {int, 4}}]}
+    end, Statements) andalso
+    lists:any(fun(Statement) ->
+        maps:get(kind, Statement, none) == variable andalso
+        maps:get(name, Statement, none) == "updated_limited" andalso
+        maps:get(type, Statement, none) == restricted_map
+    end, Statements);
+expect_immutable_updates(_) -> false.
+
+expect_record_update_bad_field(
+  {error, {in_function, "Main",
+           {unknown_record_field, "Player", "missing"}}}) -> true;
+expect_record_update_bad_field(_) -> false.
+
+expect_record_update_bad_type(
+  {error, {in_function, "Main",
+           {record_update_type_mismatch, "Player", "score", int, string}}}) -> true;
+expect_record_update_bad_type(_) -> false.
 
 expect_records({ok, Program}) ->
     [Player, Team] = maps:get(records, Program),
@@ -427,11 +467,8 @@ expect_missing_return_type({error, {expected_return_type, _Tokens}}) ->
 expect_missing_return_type(_) ->
     false.
 
-expect_empty_return({error, {in_function, "Main",
-                             {with_span, {expected_expression, _Tokens}, _Span}}}) ->
-    true;
-expect_empty_return({error, {in_function, "Main", {expected_expression, _Tokens}}}) ->
-    true;
+expect_empty_return({error, {in_function, "Main", empty_return}}) -> true;
+expect_empty_return({error, {in_function, "Main", {with_span, empty_return, _Span}}}) -> true;
 expect_empty_return(_) ->
     false.
 
@@ -495,6 +532,36 @@ expect_invalid_numeric_conversion(
   {error, {in_function, "Main", {invalid_numeric_conversion, string, int}}}) ->
     true;
 expect_invalid_numeric_conversion(_) ->
+    false.
+
+expect_conversions({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    Statements = maps:get(statements, Main),
+    lists:any(fun(Statement) ->
+        maps:get(kind, Statement, none) == variable andalso
+        maps:get(name, Statement, none) == "int_value" andalso
+        maps:get(type, Statement, none) == int andalso
+        maps:get(value, Statement, none) == {call, "parse_int", [{string, <<"12">>}]}
+    end, Statements) andalso
+    lists:any(fun(Statement) ->
+        maps:get(kind, Statement, none) == variable andalso
+        maps:get(name, Statement, none) == "atom_text" andalso
+        maps:get(type, Statement, none) == string andalso
+        maps:get(value, Statement, none) == {call, "to_binary", [{atom, ready}]}
+    end, Statements);
+expect_conversions(_) ->
+    false.
+
+expect_conversion_bad_argument(
+  {error, {in_function, "Main",
+           {argument_type_mismatch, "parse_int", [string], [int]}}}) -> true;
+expect_conversion_bad_argument(_) ->
+    false.
+
+expect_conversion_bad_to_string(
+  {error, {in_function, "Main",
+           {invalid_conversion_argument, "to_string", map}}}) -> true;
+expect_conversion_bad_to_string(_) ->
     false.
 
 expect_pointers({ok, Program}) ->

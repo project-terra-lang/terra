@@ -104,10 +104,26 @@ function Number Main(String Args) {
   stdout(profile.count);
   stdout(limited_profile.members);
   local ShowcasePlayer player = ShowcasePlayer("Ada", 7);
+  local ShowcasePlayer updated_player = player{ score = 8 };
+  local Map updated_profile = profile{ :version => 2 };
+  local RestrictedMap updated_limited_profile = limited_profile{ :mode => "demo" };
   local ShowcaseStatus player_status = ShowcaseStatus.Ready(player.score);
   stdout(player.name);
   stdout(player.score);
+  stdout(updated_player.score);
+  stdout(updated_profile.version);
+  stdout(updated_limited_profile.count);
   stdout(player_status.tag);
+
+  -- Safe conversion helpers.
+  local Int parsed_port = parse_int("8080");
+  local Float parsed_ratio = parse_float("0.5");
+  local Number parsed_count = parse_number("42");
+  stdout(to_string(parsed_port));
+  stdout(to_binary(:ready));
+  stdout(to_string(parsed_ratio));
+  stdout(parsed_count);
+
   if player_status == {
     case ShowcaseStatus.Ready(bind code):
       stdout(code);

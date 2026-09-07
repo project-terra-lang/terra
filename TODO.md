@@ -55,10 +55,10 @@ new features should arrive in small, understandable steps.
 - [x] Improve Switch Statements by making them more powerful, allow for string parsing in them, pattern matching, enum variant handlers & allow for variables to be defined in the case
 - [x] Add temporary-region fake mutability with typed pointers, explicit
       dereference/write syntax, lifecycle cleanup, and dangling-pointer checks
-- [ ] Add immutable update syntax for maps, restricted maps, and records
+- [x] Add immutable update syntax for maps, restricted maps, and records
 - [ ] Add simple module-level imports/exports without a package manager
-- [ ] Add safe numeric/string/binary conversion helpers
-- [ ] Keep nullability, failure propagation, and return-value rules easy to explain
+- [x] Add safe numeric/string/binary conversion helpers
+- [x] Keep nullability, failure propagation, and return-value rules easy to explain
 
 ## Milestone 4: Erlang and BEAM Interop
 

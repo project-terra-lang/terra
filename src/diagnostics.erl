@@ -62,6 +62,32 @@ format({unknown_record_field, Record, Field}) ->
     {unknown_record_field,
      io_lib:format("Struct ~s has no field named ~s.", [Record, Field]),
      "Use a field declared in the struct definition."};
+format({invalid_update_target, Type}) ->
+    {invalid_update_target,
+     io_lib:format("Immutable updates require a Map, RestrictedMap, or struct, but this is ~s.",
+                   [type_name(Type)]),
+     "Update a map-like value or construct a new value explicitly."};
+format({duplicate_update_field, Name}) ->
+    {duplicate_update_field,
+     io_lib:format("Field ~s is updated more than once.", [Name]),
+     "Keep one update entry for each struct field."};
+format({record_update_type_mismatch, Record, Field, Expected, Actual}) ->
+    {record_update_type_mismatch,
+     io_lib:format("Struct ~s field ~s expects ~s, but received ~s.",
+                   [Record, Field, type_name(Expected), type_name(Actual)]),
+     "Use a replacement value with the field's declared type."};
+format(record_update_requires_field) ->
+    {record_update_requires_field,
+     "Struct updates require field assignments.",
+     "Write value{ field = replacement } for structs."};
+format({expected_update_entry, _Tokens}) ->
+    {expected_update_entry,
+     "This immutable update entry is not valid Terra syntax.",
+     "Use field = value for structs or key => value for maps."};
+format({expected_update_separator_or_close, _Tokens}) ->
+    {expected_update_separator_or_close,
+     "This immutable update entry is missing a separator or closing brace.",
+     "Separate update entries with commas and close the update with }."};
 format(unterminated_record_body) ->
     {unterminated_record_body,
      "A struct definition is missing its closing brace.",
@@ -131,6 +157,10 @@ format(void_return_type) ->
     {void_return_type,
      "Terra does not have void functions.",
      "Declare a concrete return type and return a value on every path."};
+format(empty_return) ->
+    {empty_return,
+     "A return statement must return at least one value.",
+     "Write return value; using a value that matches the function's declared return type."};
 format({unknown_function, Name}) ->
     {unknown_function,
      io_lib:format("Function ~s is not defined.", [name(Name)]),
@@ -264,6 +294,16 @@ format({numeric_conversion_arity, Target, Expected, Actual}) ->
      io_lib:format("~s conversion expects ~p argument, but received ~p.",
                    [type_name(Target), Expected, Actual]),
      "Pass exactly one numeric value to the conversion."};
+format({conversion_arity, Name, Expected, Actual}) ->
+    {conversion_arity,
+     io_lib:format("Conversion helper ~s expects ~p argument, but received ~p.",
+                   [Name, Expected, Actual]),
+     "Pass the helper the documented number of values."};
+format({invalid_conversion_argument, Name, Type}) ->
+    {invalid_conversion_argument,
+     io_lib:format("Conversion helper ~s does not accept ~s.",
+                   [Name, type_name(Type)]),
+     "Use a scalar Number, Int, SInt, Float, Atom, Bool, or String value."};
 format({restricted_map_arity, Actual}) ->
     {restricted_map_arity,
      io_lib:format("RestrictedMap expects one or two arguments, but received ~p.",
@@ -286,16 +326,16 @@ format({restricted_map_capacity_exceeded, Capacity, Count}) ->
      "Increase the capacity or remove members from the initializer."};
 format({try_requires_function_call, _Value}) ->
     {try_requires_function_call,
-     "try must be followed by a user-function call.",
+     "try must be followed by a checked function or helper call.",
      "Write try Function(arguments); constructors and ordinary values do not need try."};
 format({pipe_requires_function_call, _Tokens}) ->
     {pipe_requires_function_call,
-     "The right side of |> must be a user-function call.",
+     "The right side of |> must be a checked function or helper call.",
      "Write value |> Function(arguments); the piped value becomes the first argument."};
 format(null_not_allowed) ->
     {null_not_allowed,
      "null and nil are not valid variable values.",
-     "Use a concrete value or model absence explicitly."};
+     "Use a concrete value or model absence with an enum variant or atom."};
 format({expected_function_declaration, _Tokens}) ->
     {expected_function_declaration,
      "Code was found outside a function.",

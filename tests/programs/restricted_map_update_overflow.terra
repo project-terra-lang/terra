@@ -1,0 +1,6 @@
+function Number Main(String Args) {
+    local RestrictedMap limited = RestrictedMap(1, #(:first => 1));
+    local RestrictedMap updated = limited{ :second => 2 };
+    stdout(Args, updated.count);
+    return updated.count;
+}

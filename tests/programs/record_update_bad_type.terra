@@ -1,0 +1,10 @@
+struct Player {
+    String name;
+    Int score;
+}
+
+function Number Main(String Args) {
+    local Player player = Player(Args, 1);
+    local Player updated = player{ score = Args };
+    return updated.score;
+}

@@ -104,6 +104,45 @@ numeric values and produce `Bool`; string ordering remains string-only.
 
 `null` and `nil` are tokenized but rejected as variable values.
 
+String parsing helpers convert text to numeric values:
+
+```terra
+parse_int("12")       // Int
+parse_sint("-12")     // SInt
+parse_float("3.5")    // Float
+parse_number("42")    // Number
+```
+
+They accept exactly one `String`. Invalid text fails explicitly at runtime with
+`{invalid_conversion, string, Target, Value}` instead of producing a sentinel
+value.
+
+Formatting helpers convert scalar values to strings:
+
+```terra
+to_string(42)
+to_string(:ready)
+to_binary(true)
+```
+
+`to_string` and `to_binary` accept `Number`, `Int`, `SInt`, `Float`, `Atom`,
+`Bool`, or `String`, and return `String`. Terra strings are BEAM binaries at
+runtime; `to_binary` is a named helper for that representation until Terra grows
+a distinct `Binary` type.
+
+### Absence, Failure, And Return Values
+
+Terra keeps absence, failure, and returns separate:
+
+- Absence is modeled as ordinary data. `null` and `nil` are rejected; use an
+  enum variant such as `Result.Missing()` or an atom such as `:missing`.
+- Failure is propagation, not a hidden optional value. `try` and `|>` preserve
+  the original runtime failure for checked function/helper calls. Constructors
+  and ordinary values do not need `try`.
+- Returns are explicit values. Every function declares concrete return types,
+  `return;` is rejected, and every control-flow path must return values matching
+  the declaration.
+
 ### User-Defined Structs
 
 Structs define small immutable data values at module scope:
@@ -125,6 +164,10 @@ and preserves field types through chained member access. Struct types may be
 used for fields, variables, parameters, and function returns. At runtime a
 struct is an immutable tagged BEAM map; its representation is an implementation
 detail rather than additional mutation syntax.
+
+Struct bodies may contain small inline `struct` or `enum` declarations. Inline
+user types are registered by their declared name and can be used by later
+fields, functions, constructors, and enum matches.
 
 ### Tagged Enums
 
@@ -366,6 +409,21 @@ later mutation operation. `value.count` returns an `Int` member count and
 `value.members` returns a `List` of key/value tuples for both `Map` and
 `RestrictedMap`. Other member names continue to perform ordinary key lookup.
 
+Immutable update expressions use braces after an existing map-like or struct
+value:
+
+```terra
+local Player next = player{ score = 11 };
+local Map changed = data{ :count => 2, key => "value" };
+local RestrictedMap bounded = limited{ :status => "ready" };
+```
+
+An update returns a new value and leaves the original binding untouched. Struct
+updates use `field = value`, require declared fields, and check replacement
+types statically. Map and restricted-map updates use either `field = value` as
+an atom-key shorthand or `key_expression => value`. Restricted-map updates keep
+the original capacity and recheck it after applying the entries.
+
 Function and constructor-style calls use parentheses:
 
 ```terra
@@ -374,8 +432,8 @@ List()
 State()
 ```
 
-`try` may prefix a user-function call in any expression position or as a
-standalone call:
+`try` may prefix a checked function/helper call in any expression position or as
+a standalone call:
 
 ```terra
 local Int value = try LoadValue();
@@ -383,14 +441,14 @@ try Record(value);
 return try Forward(value);
 ```
 
-On success, `try` evaluates to the function's ordinary declared return value.
+On success, `try` evaluates to the call's ordinary declared return value.
 On failure, it re-raises the original BEAM exception with its reason and stack
 unchanged, allowing `terra run` to retain the originating Terra source frame.
 Constructors and non-call expressions reject `try`. Bare calls remain valid in
 Terra v0 for compatibility; `try` documents and preserves explicit propagation.
 
-The pipe operator passes its left value as the first argument of the user
-function on its right. Pipelines associate left-to-right:
+The pipe operator passes its left value as the first argument of the checked
+function/helper call on its right. Pipelines associate left-to-right:
 
 ```terra
 return 2 |> Increment() |> Add(3);
@@ -399,8 +457,8 @@ return 2 |> Increment() |> Add(3);
 This is equivalent to `Add(Increment(2), 3)`. Each stage is type checked using
 the inserted first argument. A failure in the left expression or any called
 stage propagates its original BEAM class, reason, stack, and Terra source frame.
-The right side must be a user-function call; a returned final stage continues
-to use Terra's tail-call dispatch.
+The right side must be a checked function/helper call. A returned final
+user-function stage continues to use Terra's tail-call dispatch.
 
 Member access chains use dots. Map `.count` and `.members` have the concrete
 types described above; ordinary key access currently infers to `Var`:

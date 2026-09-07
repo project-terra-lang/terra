@@ -1,0 +1,4 @@
+function Number Main(String Args) {
+    local Int value = parse_int(Args);
+    return value;
+}

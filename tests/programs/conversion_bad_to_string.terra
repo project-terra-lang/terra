@@ -1,0 +1,6 @@
+function Number Main(String Args) {
+    local Map data = #(:name => Args);
+    local String text = to_string(data);
+    stdout(text);
+    return 0;
+}

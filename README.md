@@ -80,6 +80,29 @@ arbitrary-precision integers at runtime. Terra follows Erlang numeric semantics:
 Terra has no `null`, `nil`, or `undefined` value. Model absence explicitly with
 an enum variant or an atom.
 
+The value rules are deliberately small:
+
+- Absence is data. Use an enum variant or atom instead of `null`.
+- Failure is propagation. Use `try` or `|>` with checked function/helper calls;
+  invalid conversions and runtime failures raise explicit errors.
+- Returns are values. Every function declares a concrete return type and every
+  path returns values matching that declaration.
+
+Safe conversion helpers keep parsing and formatting explicit:
+
+```terra
+local Int port = parse_int("8080");
+local Float ratio = parse_float("0.5");
+local Number count = parse_number("42");
+local String label = to_string(port);
+local String bytes = to_binary(:ready);
+```
+
+`parse_int`, `parse_sint`, `parse_float`, and `parse_number` accept `String`
+input and fail explicitly on invalid text. `to_string` and `to_binary` accept
+scalar values. Terra does not yet have a separate `Binary` type; `to_binary`
+currently returns the BEAM-binary string representation.
+
 ## Immutable Variables
 
 Bindings cannot be reassigned after declaration.
@@ -199,6 +222,18 @@ local Result result = Result.Ok(42);
 Structs and enum values compile to tagged Erlang maps, so generated values stay
 easy to inspect and exchange with Erlang code.
 
+Maps, restricted maps, and structs support immutable update expressions:
+
+```terra
+local Player next = player{ score = 11 };
+local Map changed = data{ :count => 2, :dynamic_key => "value" };
+local RestrictedMap bounded = limited{ :status => "ready" };
+```
+
+Updates return a new value and leave the original binding untouched. Struct
+updates require declared field names and type-compatible values. Restricted map
+updates keep the original capacity and fail if new keys would exceed it.
+
 ## Functions And Failure
 
 Functions declare parameter and return types. Multiple return values compile to
@@ -221,7 +256,7 @@ local Result attempted = try risky_call();
 - A normal call returns the function's value.
 - A bare zero-argument function name invokes it successfully at most once per
   generated module and BEAM process.
-- `try` invokes a user function with explicit failure propagation.
+- `try` invokes a checked function/helper call with explicit failure propagation.
 
 The pipe operator passes the left value as the first argument of the call on the
 right:

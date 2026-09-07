@@ -181,17 +181,34 @@ tail_dispatch_clause(Target, Arity) ->
      lists:join(", ", Args), ")"].
 
 tail_calls(#{kind := return, values := [{call, Name, Args}]}) when is_list(Name) ->
-    [{Name, length(Args)}];
+    case is_intrinsic_call(Name) of
+        true -> [];
+        false -> [{Name, length(Args)}]
+    end;
 tail_calls(#{kind := return, values := [{try_call, Name, Args}]}) ->
-    [{Name, length(Args)}];
+    case is_intrinsic_call(Name) of
+        true -> [];
+        false -> [{Name, length(Args)}]
+    end;
 tail_calls(#{kind := return, values := [{pipe_call, _Left, Name, Args}]}) ->
-    [{Name, length(Args) + 1}];
+    case is_intrinsic_call(Name) of
+        true -> [];
+        false -> [{Name, length(Args) + 1}]
+    end;
 tail_calls(Value) when is_map(Value) ->
     lists:append([tail_calls(Child) || Child <- maps:values(Value)]);
 tail_calls(Value) when is_list(Value) ->
     lists:append([tail_calls(Child) || Child <- Value]);
 tail_calls(_Value) ->
     [].
+
+is_intrinsic_call("parse_int") -> true;
+is_intrinsic_call("parse_sint") -> true;
+is_intrinsic_call("parse_float") -> true;
+is_intrinsic_call("parse_number") -> true;
+is_intrinsic_call("to_string") -> true;
+is_intrinsic_call("to_binary") -> true;
+is_intrinsic_call(_Name) -> false.
 
 bind_parameters([], Counter, Names, Env) ->
     {lists:reverse(Names), Env, Counter};
@@ -282,22 +299,40 @@ generate_statement(#{kind := call, name := Name, args := Args,
     {[indent(Level), Code], Env, Counter};
 generate_statement(#{kind := return, values := [{call, Name, Args}]}, Env, Counter,
                    Level, _FunctionName) when is_list(Name) ->
-    TailArgs = [expression(Arg, Env) || Arg <- Args],
-    Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
-            lists:join(", ", TailArgs), "]})"],
+    Code = case is_intrinsic_call(Name) of
+               true ->
+                   ["throw({terra_return, ", function_call(Name, Args, Env), "})"];
+               false ->
+                   TailArgs = [expression(Arg, Env) || Arg <- Args],
+                   ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
+                    lists:join(", ", TailArgs), "]})"]
+           end,
     {[indent(Level), Code], Env, Counter};
 generate_statement(#{kind := return, values := [{try_call, Name, Args}]}, Env, Counter,
                    Level, _FunctionName) ->
-    TailArgs = [expression(Arg, Env) || Arg <- Args],
-    Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
-            lists:join(", ", TailArgs), "]})"],
+    Code = case is_intrinsic_call(Name) of
+               true ->
+                   ["throw({terra_return, terra_try(fun() -> ",
+                    function_call(Name, Args, Env), " end)})"];
+               false ->
+                   TailArgs = [expression(Arg, Env) || Arg <- Args],
+                   ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
+                    lists:join(", ", TailArgs), "]})"]
+           end,
     {[indent(Level), Code], Env, Counter};
 generate_statement(#{kind := return,
                      values := [{pipe_call, Left, Name, Args}]}, Env, Counter,
                    Level, _FunctionName) ->
-    TailArgs = [expression(Left, Env) | [expression(Arg, Env) || Arg <- Args]],
-    Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
-            lists:join(", ", TailArgs), "]})"],
+    Code = case is_intrinsic_call(Name) of
+               true ->
+                   ["throw({terra_return, ",
+                    expression({pipe_call, Left, Name, Args}, Env), "})"];
+               false ->
+                   TailArgs = [expression(Left, Env) |
+                               [expression(Arg, Env) || Arg <- Args]],
+                   ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
+                    lists:join(", ", TailArgs), "]})"]
+           end,
     {[indent(Level), Code], Env, Counter};
 generate_statement(#{kind := return, values := Values}, Env, Counter,
                    Level, _FunctionName) ->
@@ -484,6 +519,9 @@ expression({variant, EnumName, VariantName, Fields}, Env) ->
     ["#{'$terra_enum' => ", io_lib:format("~p", [list_to_atom(EnumName)]),
      ", tag => ", io_lib:format("~p", [list_to_atom(VariantName)]),
      case Entries of [] -> ""; _ -> [", ", lists:join(", ", Entries)] end, "}"];
+expression({update, Base, Updates}, Env) ->
+    ["terra_update(", expression(Base, Env), ", [",
+     lists:join(", ", [update_entry(Update, Env) || Update <- Updates]), "])"];
 expression({pointer_new, Value}, Env) ->
     ["terra_pointer_new(", expression(Value, Env), ")"];
 expression({pointer_read, Value}, Env) ->
@@ -511,10 +549,27 @@ expression({pipe_call, Left, Name, Args}, Env) ->
      "fun(TerraPipeValue) -> ", pipe_function_call(Name, Args, Env), " end)"];
 expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
 
-pipe_function_call(Name, Args, Env) ->
-    [function_name(Name), "(TerraPipeValue",
-     [[", ", expression(Arg, Env)] || Arg <- Args], ")"].
+update_entry({{field, Name}, Value}, Env) ->
+    ["{", io_lib:format("~p", [list_to_atom(Name)]), ", ", expression(Value, Env), "}"];
+update_entry({{key, Key}, Value}, Env) ->
+    ["{", expression(Key, Env), ", ", expression(Value, Env), "}"].
 
+pipe_function_call(Name, Args, Env) ->
+    function_call(Name, [{var_ref, "$pipe"} | Args],
+                  maps:put("$pipe", {direct, "TerraPipeValue"}, Env)).
+
+function_call("parse_int", [Arg], Env) ->
+    ["terra_parse_int(", expression(Arg, Env), ")"];
+function_call("parse_sint", [Arg], Env) ->
+    ["terra_parse_sint(", expression(Arg, Env), ")"];
+function_call("parse_float", [Arg], Env) ->
+    ["terra_parse_float(", expression(Arg, Env), ")"];
+function_call("parse_number", [Arg], Env) ->
+    ["terra_parse_number(", expression(Arg, Env), ")"];
+function_call("to_string", [Arg], Env) ->
+    ["terra_to_string(", expression(Arg, Env), ")"];
+function_call("to_binary", [Arg], Env) ->
+    ["terra_to_binary(", expression(Arg, Env), ")"];
 function_call(Name, Args, Env) when is_list(Name) ->
     [function_name(Name), "(",
      lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
@@ -616,6 +671,26 @@ runtime_helpers() ->
     "terra_to_sint(Value) when is_float(Value) -> trunc(Value).\n\n"
     "terra_to_float(Value) when is_float(Value) -> Value;\n"
     "terra_to_float(Value) when is_integer(Value) -> float(Value).\n\n"
+    "terra_parse_int(Value) when is_binary(Value) ->\n"
+    "    try binary_to_integer(Value)\n"
+    "    catch _:_ -> erlang:error({invalid_conversion, string, int, Value}) end.\n\n"
+    "terra_parse_sint(Value) when is_binary(Value) ->\n"
+    "    try binary_to_integer(Value)\n"
+    "    catch _:_ -> erlang:error({invalid_conversion, string, sint, Value}) end.\n\n"
+    "terra_parse_float(Value) when is_binary(Value) ->\n"
+    "    try binary_to_float(Value)\n"
+    "    catch _:_ -> erlang:error({invalid_conversion, string, float, Value}) end.\n\n"
+    "terra_parse_number(Value) when is_binary(Value) ->\n"
+    "    try binary_to_integer(Value)\n"
+    "    catch _:_ ->\n"
+    "        try binary_to_float(Value)\n"
+    "        catch _:_ -> erlang:error({invalid_conversion, string, number, Value}) end\n"
+    "    end.\n\n"
+    "terra_to_string(Value) when is_binary(Value) -> Value;\n"
+    "terra_to_string(Value) when is_integer(Value) -> integer_to_binary(Value);\n"
+    "terra_to_string(Value) when is_float(Value) -> float_to_binary(Value, [short]);\n"
+    "terra_to_string(Value) when is_atom(Value) -> atom_to_binary(Value, utf8).\n\n"
+    "terra_to_binary(Value) -> terra_to_string(Value).\n\n"
     "terra_global(Key, Fun) ->\n"
     "    StoreKey = {?MODULE, terra_global, Key},\n"
     "    case persistent_term:get(StoreKey, terra_missing) of\n"
@@ -717,6 +792,14 @@ runtime_helpers() ->
     "    {terra_restricted_map, Capacity, Value};\n"
     "terra_restricted_map(Capacity, Value) ->\n"
     "    erlang:error({invalid_restricted_map, Capacity, Value}).\n\n"
+    "terra_update({terra_restricted_map, Capacity, Value}, Updates) ->\n"
+    "    terra_restricted_map(Capacity, terra_apply_updates(Value, Updates));\n"
+    "terra_update(Value, Updates) when is_map(Value) ->\n"
+    "    terra_apply_updates(Value, Updates);\n"
+    "terra_update(Value, _Updates) -> erlang:error({cannot_update, Value}).\n\n"
+    "terra_apply_updates(Value, []) -> Value;\n"
+    "terra_apply_updates(Value, [{Key, Next} | Rest]) ->\n"
+    "    terra_apply_updates(maps:put(Key, Next, Value), Rest).\n\n"
     "terra_member({terra_restricted_map, _Capacity, Value}, count) -> map_size(Value);\n"
     "terra_member({terra_restricted_map, _Capacity, Value}, members) -> maps:to_list(Value);\n"
     "terra_member({terra_restricted_map, _Capacity, Value}, Key) -> maps:get(Key, Value);\n"

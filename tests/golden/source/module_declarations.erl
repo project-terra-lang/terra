@@ -38,6 +38,32 @@ terra_to_sint(Value) when is_float(Value) -> trunc(Value).
 terra_to_float(Value) when is_float(Value) -> Value;
 terra_to_float(Value) when is_integer(Value) -> float(Value).
 
+terra_parse_int(Value) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ -> erlang:error({invalid_conversion, string, int, Value}) end.
+
+terra_parse_sint(Value) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ -> erlang:error({invalid_conversion, string, sint, Value}) end.
+
+terra_parse_float(Value) when is_binary(Value) ->
+    try binary_to_float(Value)
+    catch _:_ -> erlang:error({invalid_conversion, string, float, Value}) end.
+
+terra_parse_number(Value) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ ->
+        try binary_to_float(Value)
+        catch _:_ -> erlang:error({invalid_conversion, string, number, Value}) end
+    end.
+
+terra_to_string(Value) when is_binary(Value) -> Value;
+terra_to_string(Value) when is_integer(Value) -> integer_to_binary(Value);
+terra_to_string(Value) when is_float(Value) -> float_to_binary(Value, [short]);
+terra_to_string(Value) when is_atom(Value) -> atom_to_binary(Value, utf8).
+
+terra_to_binary(Value) -> terra_to_string(Value).
+
 terra_global(Key, Fun) ->
     StoreKey = {?MODULE, terra_global, Key},
     case persistent_term:get(StoreKey, terra_missing) of
@@ -153,6 +179,16 @@ terra_restricted_map(Capacity, Value)
     {terra_restricted_map, Capacity, Value};
 terra_restricted_map(Capacity, Value) ->
     erlang:error({invalid_restricted_map, Capacity, Value}).
+
+terra_update({terra_restricted_map, Capacity, Value}, Updates) ->
+    terra_restricted_map(Capacity, terra_apply_updates(Value, Updates));
+terra_update(Value, Updates) when is_map(Value) ->
+    terra_apply_updates(Value, Updates);
+terra_update(Value, _Updates) -> erlang:error({cannot_update, Value}).
+
+terra_apply_updates(Value, []) -> Value;
+terra_apply_updates(Value, [{Key, Next} | Rest]) ->
+    terra_apply_updates(maps:put(Key, Next, Value), Rest).
 
 terra_member({terra_restricted_map, _Capacity, Value}, count) -> map_size(Value);
 terra_member({terra_restricted_map, _Capacity, Value}, members) -> maps:to_list(Value);

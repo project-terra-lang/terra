@@ -791,6 +791,8 @@ parse_statements([{keyword, 'if'} | Rest], F, Sigs, Env, Acc) ->
     parse_if(Rest, F, Sigs, Env, Acc);
 parse_statements([{keyword, unless} | Rest], F, Sigs, Env, Acc) ->
     parse_unless(Rest, F, Sigs, Env, Acc);
+parse_statements([{keyword, return}, {endofline, ";"} | _Rest], _F, _Sigs, _Env, _Acc) ->
+    {error, empty_return};
 parse_statements([{keyword, return} | Rest], F, Sigs, Env, Acc) ->
     case parse_expr_list(Rest, endofline, Sigs, Env, []) of
         {ok, Values, Remaining} ->
@@ -1649,24 +1651,160 @@ parse_primary([{id, EnumName}, {dot, "."}, {id, VariantName},
                {lparen, "("} | Rest], Sigs, Env) ->
     parse_variant_call(EnumName, VariantName, Rest, Sigs, Env);
 parse_primary([{id, Name}, {lparen, "("} | Rest], Sigs, Env) ->
-    parse_call(Name, Rest, Sigs, Env);
+    case parse_call(Name, Rest, Sigs, Env) of
+        {ok, Value, Remaining} -> parse_members(Value, Remaining, Sigs, Env);
+        Error -> Error
+    end;
 parse_primary([{keyword, Name}, {lparen, "("} | Rest], Sigs, Env) ->
-    parse_call(Name, Rest, Sigs, Env);
+    case parse_call(Name, Rest, Sigs, Env) of
+        {ok, Value, Remaining} -> parse_members(Value, Remaining, Sigs, Env);
+        Error -> Error
+    end;
 parse_primary([{id, Name} | Rest], _Sigs, _Env) ->
-    parse_members({var_ref, Name}, Rest);
+    parse_members({var_ref, Name}, Rest, _Sigs, _Env);
 parse_primary([{lbracket, "["} | Rest], Sigs, Env) ->
-    parse_sequence(Rest, rbracket, list, [], Sigs, Env);
-parse_primary([{lparen, "("} | Rest], Sigs, Env) -> parse_group(Rest, Sigs, Env);
+    case parse_sequence(Rest, rbracket, list, [], Sigs, Env) of
+        {ok, Value, Remaining} -> parse_members(Value, Remaining, Sigs, Env);
+        Error -> Error
+    end;
+parse_primary([{lparen, "("} | Rest], Sigs, Env) ->
+    case parse_group(Rest, Sigs, Env) of
+        {ok, Value, Remaining} -> parse_members(Value, Remaining, Sigs, Env);
+        Error -> Error
+    end;
 parse_primary([{hash, "#"}, {lparen, "("} | Rest], Sigs, Env) ->
-    parse_map(Rest, Sigs, Env, []);
+    case parse_map(Rest, Sigs, Env, []) of
+        {ok, Value, Remaining} -> parse_members(Value, Remaining, Sigs, Env);
+        Error -> Error
+    end;
 parse_primary(Other, _Sigs, _Env) -> {error, {expected_expression, Other}}.
 
-parse_members(Value, [{dot, "."}, {id, Name} | Rest]) ->
-    parse_members({member, Value, Name}, Rest);
-parse_members(Value, [{dot, "."}, {times, "*"} | Rest]) ->
-    parse_members({pointer_read, Value}, Rest);
-parse_members(Value, Rest) ->
+parse_members(Value, [{dot, "."}, {id, Name} | Rest], Sigs, Env) ->
+    parse_members({member, Value, Name}, Rest, Sigs, Env);
+parse_members(Value, [{dot, "."}, {times, "*"} | Rest], Sigs, Env) ->
+    parse_members({pointer_read, Value}, Rest, Sigs, Env);
+parse_members(Value, [{lbrace, "{"} | Rest] = Tokens, Sigs, Env) ->
+    case looks_like_update_entries(Rest) of
+        true ->
+    case parse_update_entries(Rest, Sigs, Env, []) of
+        {ok, Updates, Remaining} ->
+            case validate_update(Value, Updates, Sigs, Env) of
+                ok -> parse_members({update, Value, Updates}, Remaining, Sigs, Env);
+                Error -> Error
+            end;
+        Error -> Error
+    end;
+        false -> {ok, Value, Tokens}
+    end;
+parse_members(Value, Rest, _Sigs, _Env) ->
     {ok, Value, Rest}.
+
+looks_like_update_entries([{id, _Name}, {equals, "="} | _Rest]) ->
+    true;
+looks_like_update_entries(Tokens) ->
+    has_top_level_fat_arrow(Tokens, 0).
+
+has_top_level_fat_arrow([{fat_arrow, "=>"} | _Rest], 0) -> true;
+has_top_level_fat_arrow([{comma, ","} | _Rest], 0) -> false;
+has_top_level_fat_arrow([{rbrace, "}"} | _Rest], 0) -> false;
+has_top_level_fat_arrow([{lparen, "("} | Rest], Depth) ->
+    has_top_level_fat_arrow(Rest, Depth + 1);
+has_top_level_fat_arrow([{rparen, ")"} | Rest], Depth) when Depth > 0 ->
+    has_top_level_fat_arrow(Rest, Depth - 1);
+has_top_level_fat_arrow([{lbracket, "["} | Rest], Depth) ->
+    has_top_level_fat_arrow(Rest, Depth + 1);
+has_top_level_fat_arrow([{rbracket, "]"} | Rest], Depth) when Depth > 0 ->
+    has_top_level_fat_arrow(Rest, Depth - 1);
+has_top_level_fat_arrow([{lbrace, "{"} | Rest], Depth) ->
+    has_top_level_fat_arrow(Rest, Depth + 1);
+has_top_level_fat_arrow([{rbrace, "}"} | Rest], Depth) when Depth > 0 ->
+    has_top_level_fat_arrow(Rest, Depth - 1);
+has_top_level_fat_arrow([_Token | Rest], Depth) ->
+    has_top_level_fat_arrow(Rest, Depth);
+has_top_level_fat_arrow([], _Depth) ->
+    false.
+
+parse_update_entries([{rbrace, "}"} | Rest], _Sigs, _Env, Acc) ->
+    {ok, lists:reverse(Acc), Rest};
+parse_update_entries([{id, Name}, {equals, "="} | Rest], Sigs, Env, Acc) ->
+    parse_update_value({field, Name}, Rest, Sigs, Env, Acc);
+parse_update_entries(Tokens, Sigs, Env, Acc) ->
+    case parse_expr(Tokens, Sigs, Env) of
+        {ok, Key, [{fat_arrow, "=>"} | Rest]} ->
+            parse_update_value({key, Key}, Rest, Sigs, Env, Acc);
+        {ok, _Key, Other} -> {error, {expected_update_entry, Other}};
+        Error -> Error
+    end.
+
+parse_update_value(Target, Tokens, Sigs, Env, Acc) ->
+    case parse_expr(Tokens, Sigs, Env) of
+        {ok, Value, [{comma, ","} | Rest]} ->
+            parse_update_entries(Rest, Sigs, Env, [{Target, Value} | Acc]);
+        {ok, Value, [{rbrace, "}"} | Rest]} ->
+            {ok, lists:reverse([{Target, Value} | Acc]), Rest};
+        {ok, _Value, Other} -> {error, {expected_update_separator_or_close, Other}};
+        Error -> Error
+    end.
+
+validate_update(Base, Updates, Sigs, Env) ->
+    case single_type(Base, Sigs, Env) of
+        {ok, {named, TypeName}} ->
+            validate_record_update(TypeName, Updates, Sigs, Env);
+        {ok, Type} when Type == map; Type == restricted_map ->
+            validate_map_update(Updates, Sigs, Env);
+        {ok, Type} ->
+            {error, {invalid_update_target, Type}};
+        Error -> Error
+    end.
+
+validate_record_update(TypeName, Updates, Sigs, Env) ->
+    case maps:find(TypeName, Sigs) of
+        {ok, #{kind := struct, fields := Fields}} ->
+            case duplicate_update_field(Updates) of
+                none -> validate_record_update_fields(TypeName, Fields, Updates, Sigs, Env);
+                Name -> {error, {duplicate_update_field, Name}}
+            end;
+        {ok, #{kind := enum}} -> {error, {invalid_update_target, {named, TypeName}}};
+        _ -> {error, {unknown_record_type, TypeName}}
+    end.
+
+duplicate_update_field(Updates) ->
+    duplicate_string([Name || {{field, Name}, _Value} <- Updates], []).
+
+validate_record_update_fields(_TypeName, _Fields, [], _Sigs, _Env) ->
+    ok;
+validate_record_update_fields(TypeName, Fields, [{{field, Name}, Value} | Rest],
+                              Sigs, Env) ->
+    case [maps:get(type, Field) || Field <- Fields, maps:get(name, Field) == Name] of
+        [Expected] ->
+            case single_type(Value, Sigs, Env) of
+                {ok, Actual} ->
+                    case type_accepts(Expected, Actual) of
+                        true -> validate_record_update_fields(TypeName, Fields, Rest, Sigs, Env);
+                        false -> {error, {record_update_type_mismatch,
+                                          TypeName, Name, Expected, Actual}}
+                    end;
+                Error -> Error
+            end;
+        [] -> {error, {unknown_record_field, TypeName, Name}}
+    end;
+validate_record_update_fields(_TypeName, _Fields, [{{key, _Key}, _Value} | _Rest],
+                              _Sigs, _Env) ->
+    {error, record_update_requires_field}.
+
+validate_map_update([], _Sigs, _Env) ->
+    ok;
+validate_map_update([{{field, _Name}, Value} | Rest], Sigs, Env) ->
+    case single_type(Value, Sigs, Env) of
+        {ok, _Type} -> validate_map_update(Rest, Sigs, Env);
+        Error -> Error
+    end;
+validate_map_update([{{key, Key}, Value} | Rest], Sigs, Env) ->
+    case {single_type(Key, Sigs, Env), single_type(Value, Sigs, Env)} of
+        {{ok, _KeyType}, {ok, _ValueType}} -> validate_map_update(Rest, Sigs, Env);
+        {{error, Reason}, _} -> {error, Reason};
+        {_, {error, Reason}} -> {error, Reason}
+    end.
 
 parse_group(Tokens, Sigs, Env) ->
     case parse_expr(Tokens, Sigs, Env) of
@@ -1777,6 +1915,21 @@ validate_call(Name, Args, Sigs, Env)
   when Name == number; Name == int; Name == sint; Name == float ->
     validate_numeric_conversion(Name, Args, Sigs, Env);
 validate_call(Name, Args, Sigs, Env) when is_list(Name) ->
+    case conversion_helper(Name) of
+        none -> validate_named_call(Name, Args, Sigs, Env);
+        Helper -> validate_conversion_helper(Name, Helper, Args, Sigs, Env)
+    end;
+validate_call(Name, Args, Sigs, Env) when is_atom(Name) ->
+    case is_type(Name) of
+        true ->
+            case expression_types(Args, Sigs, Env, []) of
+                {ok, _} -> {ok, [Name]};
+                Error -> Error
+            end;
+        false -> {error, {unknown_function, Name}}
+    end.
+
+validate_named_call(Name, Args, Sigs, Env) ->
     case maps:find(Name, Sigs) of
         {ok, #{kind := enum}} -> {error, {enum_variant_required, Name}};
         {ok, #{params := Params, return_types := Returns}} ->
@@ -1790,16 +1943,49 @@ validate_call(Name, Args, Sigs, Env) when is_list(Name) ->
                 Error -> Error
             end;
         error -> {error, {unknown_function, Name}}
-    end;
-validate_call(Name, Args, Sigs, Env) when is_atom(Name) ->
-    case is_type(Name) of
-        true ->
-            case expression_types(Args, Sigs, Env, []) of
-                {ok, _} -> {ok, [Name]};
-                Error -> Error
-            end;
-        false -> {error, {unknown_function, Name}}
     end.
+
+conversion_helper("parse_int") -> {parse, int};
+conversion_helper("parse_sint") -> {parse, sint};
+conversion_helper("parse_float") -> {parse, float};
+conversion_helper("parse_number") -> {parse, number};
+conversion_helper("to_string") -> {format, string};
+conversion_helper("to_binary") -> {format, string};
+conversion_helper(_Name) -> none.
+
+validate_conversion_helper(Name, {parse, ReturnType}, Args, Sigs, Env) ->
+    validate_conversion_signature(Name, Args, [string], [ReturnType], Sigs, Env);
+validate_conversion_helper(Name, {format, string}, [Arg], Sigs, Env) ->
+    case single_type(Arg, Sigs, Env) of
+        {ok, Type} ->
+            case stringifiable_type(Type) of
+                true -> {ok, [string]};
+                false -> {error, {invalid_conversion_argument, Name, Type}}
+            end;
+        Error -> Error
+    end;
+validate_conversion_helper(Name, {format, string}, Args, _Sigs, _Env) ->
+    {error, {conversion_arity, Name, 1, length(Args)}}.
+
+validate_conversion_signature(Name, Args, Expected, Returns, Sigs, Env) ->
+    case expression_types(Args, Sigs, Env, []) of
+        {ok, Actual} when length(Actual) == length(Expected) ->
+            case types_accept(Expected, Actual) of
+                true -> {ok, Returns};
+                false -> {error, {argument_type_mismatch, Name, Expected, Actual}}
+            end;
+        {ok, Actual} -> {error, {conversion_arity, Name, length(Expected), length(Actual)}};
+        Error -> Error
+    end.
+
+stringifiable_type(number) -> true;
+stringifiable_type(int) -> true;
+stringifiable_type(sint) -> true;
+stringifiable_type(float) -> true;
+stringifiable_type(atom) -> true;
+stringifiable_type(bool) -> true;
+stringifiable_type(string) -> true;
+stringifiable_type(_) -> false.
 
 validate_user_function(Name, Args, Sigs, Env) ->
     case maps:find(Name, Sigs) of
@@ -1875,6 +2061,11 @@ infer_types({tuple, _}, _Sigs, _Env) -> {ok, [tuple]};
 infer_types({map, _}, _Sigs, _Env) -> {ok, [map]};
 infer_types({record, Name, _Fields}, _Sigs, _Env) -> {ok, [{named, Name}]};
 infer_types({variant, Name, _Variant, _Fields}, _Sigs, _Env) -> {ok, [{named, Name}]};
+infer_types({update, Base, _Updates}, Sigs, Env) ->
+    case single_type(Base, Sigs, Env) of
+        {ok, Type} -> {ok, [Type]};
+        Error -> Error
+    end;
 infer_types({pointer_new, Value}, Sigs, Env) ->
     case single_type(Value, Sigs, Env) of
         {ok, Type} -> {ok, [{pointer, Type}]};

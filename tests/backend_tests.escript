@@ -14,7 +14,9 @@ main(_Args) ->
                test_once_semantics(OutDir), test_once_failure(OutDir),
                test_once_reentrancy(OutDir),
                test_storage_semantics(OutDir), test_computed_deferred(OutDir),
+               test_conversions(OutDir), test_conversion_bad_string(OutDir),
                test_restricted_map(OutDir),
+               test_immutable_updates(OutDir), test_restricted_map_update_overflow(OutDir),
                test_records(OutDir),
                test_enums(OutDir),
                test_enum_pattern_ignore(OutDir),
@@ -344,6 +346,28 @@ test_computed_deferred(OutDir) ->
             fail
     end.
 
+test_conversions(OutDir) ->
+    Path = "tests/programs/conversions.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "echo", OutDir)} of
+        {{ok, terra_conversions, Source},
+         {ok, terra_conversions, 14, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("safe conversion helpers run on BEAM",
+                   contains(Binary, <<"terra_parse_int(">>) andalso
+                   contains(Binary, <<"terra_to_binary(">>));
+        Other ->
+            io:format("not ok - safe conversion helpers run on BEAM~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_conversion_bad_string(OutDir) ->
+    Path = "tests/programs/conversion_bad_string.terra",
+    Result = transpiler:run_file(Path, "not-a-number", OutDir),
+    expect("string parse failures are explicit",
+           is_runtime_reason(Result, {invalid_conversion, string, int,
+                                      <<"not-a-number">>})).
+
 test_restricted_map(OutDir) ->
     Path = "tests/programs/restricted_map.terra",
     case transpiler:run_file(Path, "", OutDir) of
@@ -354,6 +378,27 @@ test_restricted_map(OutDir) ->
                       [Other]),
             fail
     end.
+
+test_immutable_updates(OutDir) ->
+    Path = "tests/programs/immutable_updates.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "Ada", OutDir)} of
+        {{ok, terra_immutable_updates, Source},
+         {ok, terra_immutable_updates, 7, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("immutable updates run on BEAM",
+                   contains(Binary, <<"terra_update(">>) andalso
+                   contains(Binary, <<"terra_apply_updates(">>));
+        Other ->
+            io:format("not ok - immutable updates run on BEAM~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_restricted_map_update_overflow(OutDir) ->
+    Path = "tests/programs/restricted_map_update_overflow.terra",
+    Result = transpiler:run_file(Path, "", OutDir),
+    expect("restricted map updates enforce capacity",
+           is_runtime_reason(Result, {invalid_restricted_map, 1,
+                                      #{first => 1, second => 2}})).
 
 test_records(OutDir) ->
     Path = "tests/programs/records.terra",
