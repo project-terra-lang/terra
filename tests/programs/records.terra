@@ -1,0 +1,24 @@
+struct Player {
+    String name;
+    Int score;
+}
+
+struct Team {
+    String label;
+    Player captain;
+}
+
+function Player MakePlayer(String name, Int score) {
+    return Player(name, score);
+}
+
+function Int PlayerScore(Player player) {
+    return player.score;
+}
+
+function Number Main(String Args) {
+    local Player player = MakePlayer("Ada", 7);
+    local Team team = Team("Blue", player);
+    stdout(team.label, team.captain.name, Args);
+    return PlayerScore(team.captain);
+}

@@ -15,6 +15,8 @@ main(_Args) ->
                test_once_reentrancy(OutDir),
                test_storage_semantics(OutDir), test_computed_deferred(OutDir),
                test_restricted_map(OutDir),
+               test_records(OutDir),
+               test_enums(OutDir),
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_source_map(OutDir),
@@ -347,6 +349,34 @@ test_restricted_map(OutDir) ->
         Other ->
             io:format("not ok - restricted and ordinary map properties~n  got: ~p~n",
                       [Other]),
+            fail
+    end.
+
+test_records(OutDir) ->
+    Path = "tests/programs/records.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "records", OutDir)} of
+        {{ok, terra_records, Source},
+         {ok, terra_records, 7, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("user-defined records run on BEAM",
+                   contains(Binary, <<"#{'$terra_struct' => 'Player'">>) andalso
+                   contains(Binary, <<"terra_member(">>));
+        Other ->
+            io:format("not ok - user-defined records run on BEAM~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_enums(OutDir) ->
+    Path = "tests/programs/enums.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "enums", OutDir)} of
+        {{ok, terra_enums, Source},
+         {ok, terra_enums, 7, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("tagged enums run on BEAM",
+                   contains(Binary, <<"#{'$terra_enum' => 'Result', tag => 'Ok'">>) andalso
+                   contains(Binary, <<"terra_member(">>));
+        Other ->
+            io:format("not ok - tagged enums run on BEAM~n  got: ~p~n", [Other]),
             fail
     end.
 

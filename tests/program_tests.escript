@@ -102,6 +102,23 @@ main(_Args) ->
               fun expect_restricted_map/1},
              {"restricted map capacity", "tests/programs/restricted_map_overflow.terra",
               fun expect_restricted_map_overflow/1},
+             {"user-defined records", "tests/programs/records.terra",
+              fun expect_records/1},
+             {"record constructor types", "tests/programs/record_bad_constructor.terra",
+              fun expect_record_bad_constructor/1},
+             {"record field names", "tests/programs/record_unknown_field.terra",
+              fun expect_record_unknown_field/1},
+             {"record constructors are not pipeline functions",
+              "tests/programs/record_pipeline_invalid.terra",
+              fun expect_record_pipeline_invalid/1},
+             {"tagged enums", "tests/programs/enums.terra", fun expect_enums/1},
+             {"enum variant payload types", "tests/programs/enum_bad_variant.terra",
+              fun expect_enum_bad_variant/1},
+             {"unknown enum variant", "tests/programs/enum_unknown_variant.terra",
+              fun expect_enum_unknown_variant/1},
+             {"enum variants require explicit declarations",
+              "tests/programs/enum_implicit_variant.terra",
+              fun expect_enum_implicit_variant/1},
              {"try propagation expressions", "tests/programs/try_success.terra",
               fun expect_try_propagation/1},
              {"try requires function call", "tests/programs/try_invalid.terra",
@@ -179,6 +196,61 @@ expect_restricted_map(_) ->
 expect_restricted_map_overflow({error, {in_function, "Main",
                                         {restricted_map_capacity_exceeded, 1, 2}}}) -> true;
 expect_restricted_map_overflow(_) -> false.
+
+expect_records({ok, Program}) ->
+    [Player, Team] = maps:get(records, Program),
+    Main = find_function("Main", maps:get(functions, Program)),
+    maps:get(name, Player) == "Player" andalso
+    maps:get(fields, Player) ==
+        [#{type => string, name => "name"}, #{type => int, name => "score"}] andalso
+    maps:get(fields, Team) ==
+        [#{type => string, name => "label"},
+         #{type => {named, "Player"}, name => "captain"}] andalso
+    lists:any(fun(Statement) ->
+        maps:get(type, Statement, none) == {named, "Team"}
+    end, maps:get(statements, Main));
+expect_records(_) -> false.
+
+expect_record_bad_constructor(
+  {error, {in_function, "Main",
+           {argument_type_mismatch, "Player",
+            [string, int], [int, string]}}}) -> true;
+expect_record_bad_constructor(_) -> false.
+
+expect_record_unknown_field(
+  {error, {in_function, "Main",
+           {unknown_record_field, "Player", "score"}}}) -> true;
+expect_record_unknown_field(_) -> false.
+
+expect_record_pipeline_invalid(
+  {error, {in_function, "Main", {function_call_required, "Score"}}}) -> true;
+expect_record_pipeline_invalid(_) -> false.
+
+expect_enums({ok, Program}) ->
+    [Result] = maps:get(enums, Program),
+    [Ok, Error, Pending] = maps:get(variants, Result),
+    Load = find_function("Load", maps:get(functions, Program)),
+    maps:get(name, Result) == "Result" andalso
+    maps:get(fields, Ok) == [#{type => int, name => "value"}] andalso
+    maps:get(fields, Error) == [#{type => string, name => "message"}] andalso
+    maps:get(fields, Pending) == [] andalso
+    maps:get(return_types, Load) == [{named, "Result"}];
+expect_enums(_) -> false.
+
+expect_enum_bad_variant(
+  {error, {in_function, "Main",
+           {variant_type_mismatch, "Result", "Ok", [int], [string]}}}) -> true;
+expect_enum_bad_variant(_) -> false.
+
+expect_enum_unknown_variant(
+  {error, {in_function, "Main",
+           {unknown_enum_variant, "Status", "Missing"}}}) -> true;
+expect_enum_unknown_variant(_) -> false.
+
+expect_enum_implicit_variant({error, {expected_enum_variant, _Tokens}}) -> true;
+expect_enum_implicit_variant(
+  {error, {with_span, {expected_enum_variant, _Tokens}, _Span}}) -> true;
+expect_enum_implicit_variant(_) -> false.
 
 expect_try_propagation({ok, Program}) ->
     Main = find_function("Main", maps:get(functions, Program)),

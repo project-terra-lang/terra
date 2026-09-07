@@ -116,4 +116,5 @@ type_name(list) -> "List";
 type_name(tuple) -> "Tuple";
 type_name(string) -> "String";
 type_name(var) -> "Var";
+type_name({named, Name}) -> Name;
 type_name(Type) -> atom_to_list(Type).

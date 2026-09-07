@@ -1,0 +1,8 @@
+enum Status {
+    variant Ready;
+}
+
+function Number Main(String Args) {
+    local Status status = Status.Missing();
+    return 0;
+}

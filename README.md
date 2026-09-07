@@ -29,6 +29,8 @@ List
 Tuple
 
 String
+
+User-defined structs and tagged enums
 ```
 
 Integers use BEAM arbitrary-precision arithmetic, so integer operations do not
@@ -67,6 +69,40 @@ process. `atomic` stores `Int` or `SInt` values in a BEAM atomic cell, and
 count cannot exceed its non-negative integer capacity; `RestrictedMap(capacity)`
 creates an empty bounded map. Both `Map` and `RestrictedMap` expose `.count`
 for their member count and `.members` for a list of key/value tuples.
+
+Plain immutable data can be defined with a module-level struct and constructed
+positionally in field order:
+```lua
+struct Player {
+    String name;
+    Int score;
+}
+
+local Player player = Player("Ada", 7);
+stdout(player.name);
+```
+
+Struct constructors and field access are statically checked. Struct values map
+directly to tagged BEAM maps and may be used in function parameters and returns.
+
+Tagged enums model small state machines and result values:
+```lua
+enum Result {
+    variant Ok(Int value);
+    variant Error(String message);
+    variant Pending;
+}
+
+local Result result = Result.Ok(7);
+stdout(result.tag);  -- :Ok
+```
+
+Each `variant` line is an explicit data-constructor declaration. For example,
+`variant Ok(Int value);` declares the tag `:Ok`, payload field `value`, and the
+constructor signature `Result.Ok(Int) -> Result`. Constructors only package
+immutable data; custom validation or other behavior belongs in an ordinary user
+function. Every enum value exposes its variant as the `.tag` Atom, and variant
+payloads use their declared field names.
 
 2. Functions
 - Functions support multiple Return Values

@@ -34,6 +34,42 @@ format({duplicate_function, Name}) ->
     {duplicate_function,
      io_lib:format("Function ~s is defined more than once.", [Name]),
      "Keep one function with that name, or rename one of them."};
+format({duplicate_record, Name}) ->
+    {duplicate_record,
+     io_lib:format("Struct ~s is defined more than once.", [Name]),
+     "Keep one struct definition with that name."};
+format({duplicate_user_type, Name}) ->
+    {duplicate_user_type,
+     io_lib:format("Type ~s is defined more than once.", [Name]),
+     "Give each struct or enum a unique name."};
+format({duplicate_definition, Name}) ->
+    {duplicate_definition,
+     io_lib:format("~s is used as both a struct and a function name.", [Name]),
+     "Give the struct and function different names."};
+format({duplicate_record_field, Name}) ->
+    {duplicate_record_field,
+     io_lib:format("Struct field ~s is defined more than once.", [Name]),
+     "Keep one field with that name in the struct."};
+format({unknown_record_type, Name}) ->
+    {unknown_record_type,
+     io_lib:format("Struct type ~s is not defined.", [Name]),
+     "Add a top-level struct definition or check the type name."};
+format({unknown_user_type, Name}) ->
+    {unknown_user_type,
+     io_lib:format("User-defined type ~s is not defined.", [Name]),
+     "Add a top-level struct or enum definition, or check the type name."};
+format({unknown_record_field, Record, Field}) ->
+    {unknown_record_field,
+     io_lib:format("Struct ~s has no field named ~s.", [Record, Field]),
+     "Use a field declared in the struct definition."};
+format(unterminated_record_body) ->
+    {unterminated_record_body,
+     "A struct definition is missing its closing brace.",
+     "Add } after the final struct field."};
+format({expected_record_field, _Tokens}) ->
+    {expected_record_field,
+     "This struct field is not valid Terra syntax.",
+     "Write one typed field per line, such as Int score;"};
 format({duplicate_variable, Name}) ->
     {duplicate_variable,
      io_lib:format("Variable ~s is bound more than once in the same binding.",
@@ -84,6 +120,51 @@ format({unknown_function, Name}) ->
     {unknown_function,
      io_lib:format("Function ~s is not defined.", [name(Name)]),
      "Define it before checking the program, or check the spelling."};
+format({function_call_required, Name}) ->
+    {function_call_required,
+     io_lib:format("~s names a user-defined type, not a function.", [name(Name)]),
+     "Construct the value with parentheses; once-only calls and pipelines require functions."};
+format({duplicate_enum_variant, Name}) ->
+    {duplicate_enum_variant,
+     io_lib:format("Enum variant ~s is defined more than once.", [Name]),
+     "Keep one variant with that name in the enum."};
+format({duplicate_variant_field, Variant, Field}) ->
+    {duplicate_variant_field,
+     io_lib:format("Variant ~s defines field ~s more than once.", [Variant, Field]),
+     "Give every payload field in a variant a unique name."};
+format(unterminated_enum_body) ->
+    {unterminated_enum_body,
+     "An enum definition is missing its closing brace.",
+     "Add } after the final enum variant."};
+format({expected_enum_variant, _Tokens}) ->
+    {expected_enum_variant,
+     "This enum variant is not valid Terra syntax.",
+     "Declare it explicitly with variant Name; or variant Name(Type field);"};
+format({unknown_enum, Name}) ->
+    {unknown_enum,
+     io_lib:format("Enum ~s is not defined.", [Name]),
+     "Add a top-level enum definition or check its name."};
+format({not_an_enum, Name}) ->
+    {not_an_enum,
+     io_lib:format("~s is not an enum.", [Name]),
+     "Use EnumName.Variant(...) with a declared enum."};
+format({unknown_enum_variant, Enum, Variant}) ->
+    {unknown_enum_variant,
+     io_lib:format("Enum ~s has no variant named ~s.", [Enum, Variant]),
+     "Use a variant declared inside the enum."};
+format({variant_type_mismatch, Enum, Variant, Expected, Actual}) ->
+    {variant_type_mismatch,
+     io_lib:format("~s.~s expects ~s, but received ~s.",
+                   [Enum, Variant, type_list(Expected), type_list(Actual)]),
+     "Pass payload values in the variant's declared type order."};
+format({enum_variant_required, Name}) ->
+    {enum_variant_required,
+     io_lib:format("Enum ~s cannot be constructed without a variant.", [Name]),
+     "Write EnumName.Variant(...) to choose a tagged value."};
+format({unknown_enum_field, Enum, Field}) ->
+    {unknown_enum_field,
+     io_lib:format("Enum ~s has no payload field named ~s.", [Enum, Field]),
+     "Use .tag or a payload field declared by one of the enum variants."};
 format({unknown_variable, Name}) ->
     {unknown_variable,
      io_lib:format("Variable ~s is not available here.", [Name]),
@@ -702,6 +783,7 @@ type_name(list) -> "List";
 type_name(tuple) -> "Tuple";
 type_name(string) -> "String";
 type_name(var) -> "Var";
+type_name({named, Name}) -> Name;
 type_name(Type) -> io_lib:format("~p", [Type]).
 
 statement_name('if') -> "if";

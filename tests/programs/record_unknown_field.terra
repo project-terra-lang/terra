@@ -1,0 +1,9 @@
+struct Player {
+    String name;
+}
+
+function Number Main(String Args) {
+    local Player player = Player("Ada");
+    stdout(player.score);
+    return 0;
+}

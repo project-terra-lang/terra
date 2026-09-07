@@ -1,0 +1,30 @@
+enum Result {
+    variant Ok(Int value);
+    variant Error(String message);
+    variant Pending;
+}
+
+function Result Load(Bool ready) {
+    if ready {
+        return Result.Ok(7);
+    } else {
+        return Result.Error("not ready");
+    }
+}
+
+function Number Main(String Args) {
+    local Result result = Load(true);
+    local Result pending = Result.Pending();
+    stdout(pending.tag);
+
+    if result.tag == {
+        case :Ok:
+            stdout(Args);
+            return result.value;
+        case :Error:
+            stdout(result.message);
+            return -1;
+        case:
+            return 0;
+    }
+}

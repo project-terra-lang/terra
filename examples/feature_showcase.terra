@@ -1,6 +1,17 @@
 -- Terra feature showcase
 -- Run with: ./run.sh run examples/feature_showcase.terra hello from terra
 
+struct ShowcasePlayer {
+  String name;
+  Int score;
+}
+
+enum ShowcaseStatus {
+  variant Ready(Int code);
+  variant Failed(String message);
+  variant Waiting;
+}
+
 const Int showcase_base = 4;
 global String showcase_name = "Terra";
 
@@ -87,6 +98,12 @@ function Number Main(String Args) {
   stdout(profile.name);
   stdout(profile.count);
   stdout(limited_profile.members);
+  local ShowcasePlayer player = ShowcasePlayer("Ada", 7);
+  local ShowcaseStatus player_status = ShowcaseStatus.Ready(player.score);
+  stdout(player.name);
+  stdout(player.score);
+  stdout(player_status.tag);
+  stdout(player_status.code);
   stdout(id);
   stdout(role);
 

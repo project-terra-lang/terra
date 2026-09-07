@@ -1,0 +1,8 @@
+struct Score {
+    Int value;
+}
+
+function Number Main(String Args) {
+    local Score score = 7 |> Score();
+    return 0;
+}

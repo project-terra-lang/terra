@@ -100,6 +100,56 @@ numeric values and produce `Bool`; string ordering remains string-only.
 
 `null` and `nil` are tokenized but rejected as variable values.
 
+### User-Defined Structs
+
+Structs define small immutable data values at module scope:
+
+```terra
+struct Player {
+  String name;
+  Int score;
+}
+
+function Int Score(Player player) {
+  return player.score;
+}
+```
+
+Construction is positional and follows declaration order: `Player("Ada", 7)`.
+The compiler checks constructor arity and argument types, validates field names,
+and preserves field types through chained member access. Struct types may be
+used for fields, variables, parameters, and function returns. At runtime a
+struct is an immutable tagged BEAM map; its representation is an implementation
+detail rather than additional mutation syntax.
+
+### Tagged Enums
+
+Enums provide immutable tagged alternatives with optional typed payloads:
+
+```terra
+enum Result {
+  variant Ok(Int value);
+  variant Error(String message);
+  variant Pending;
+}
+
+local Result result = Result.Ok(7);
+```
+
+The `variant` keyword explicitly declares a data constructor. A declaration such
+as `variant Ok(Int value);` defines the tag `:Ok`, the payload field `value`, and
+the constructor signature `Result.Ok(Int) -> Result`; no undeclared constructor
+is synthesized. Constructors only package immutable data. Programs that need
+validation or behavior around construction can define an ordinary function that
+returns the enum. Constructor calls use `Enum.Variant(...)` and always include
+parentheses, including variants without payload fields. Constructor arity and
+payload types are checked.
+Every value exposes an `Atom` through `.tag`, such as `:Ok`, and payloads are
+available by their declared field names. Code should check `.tag` before reading
+a variant-specific payload; accessing a field absent from the runtime variant
+raises a missing-map-key error. Enum types may be used for fields, variables,
+parameters, and function returns. Values lower to immutable tagged BEAM maps.
+
 ## Functions
 
 Functions use the `function` keyword, a return type, a name, typed parameters,
@@ -442,8 +492,13 @@ This sketch is intentionally small and tracks the current parser. It is not yet
 a formal parser generator grammar.
 
 ```ebnf
-program         = { module_decl }, { function_decl } ;
+program         = { module_item } ;
+module_item     = struct_decl | enum_decl | module_decl | function_decl ;
 module_decl     = global_decl | const_decl ;
+struct_decl     = "struct", identifier, "{", { field_decl }, "}" ;
+field_decl      = type, identifier, ";" ;
+enum_decl       = "enum", identifier, "{", { variant_decl }, "}" ;
+variant_decl    = "variant", identifier, [ "(", [ params ], ")" ], ";" ;
 function_decl   = "function", return_types, identifier, "(", [ params ], ")",
                   block ;
 return_types    = type | "(", type, { ",", type }, ")" ;
@@ -505,6 +560,7 @@ unary           = [ "!" | "-" | "try" ], unary | primary ;
 primary         = literal
                 | identifier
                 | call
+                | variant
                 | member
                 | list
                 | tuple_or_group
@@ -512,6 +568,7 @@ primary         = literal
                 | restricted_map ;
 
 call            = identifier, "(", [ expr, { ",", expr } ], ")" ;
+variant         = identifier, ".", identifier, "(", [ expr, { ",", expr } ], ")" ;
 restricted_map  = "RestrictedMap", "(", expr, [ ",", expr ], ")" ;
 member          = identifier, ".", identifier, { ".", identifier } ;
 list            = "[", [ expr, { ",", expr } ], "]" ;

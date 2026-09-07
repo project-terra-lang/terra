@@ -50,8 +50,8 @@ new features should arrive in small, understandable steps.
 
 ## Milestone 3: Small Powerful Language Features
 
-- [ ] Add user-defined records/structs for plain data
-- [ ] Add tagged unions or enums for simple state machines and results
+- [x] Add user-defined records/structs for plain data
+- [x] Add tagged unions or enums for simple state machines and results
 - [ ] Add pattern matching only where it keeps code clearer than nested branches
 - [ ] Add immutable update syntax for maps, restricted maps, and records
 - [ ] Add simple module-level imports/exports without a package manager

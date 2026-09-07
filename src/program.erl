@@ -50,19 +50,25 @@ run_passes([{Name, Pass} | Rest], Context) ->
     end.
 
 parsing_pass(#{legacy_tokens := Tokens} = Context) ->
-    case parse_module_items(Tokens, [], []) of
-        {ok, ModuleDeclarations, Functions} ->
+    case parse_module_items(Tokens, [], [], [], []) of
+        {ok, ModuleDeclarations, Records, Enums, Functions} ->
             {ok, Context#{module_declaration_tokens => ModuleDeclarations,
+                          records => Records,
+                          enums => Enums,
                           functions => Functions}};
         Error -> Error
     end.
 
-name_resolution_pass(#{functions := Functions} = Context) ->
+name_resolution_pass(#{records := Records, enums := Enums,
+                       functions := Functions} = Context) ->
     case duplicate_name(Functions, []) of
         none ->
-            case validate_main_function(Functions) of
-                ok ->
-                    {ok, Context#{entry => "Main", signatures => signatures(Functions)}};
+            case validate_user_types(Records, Enums, Functions) of
+                ok -> case validate_main_function(Functions) of
+                ok -> {ok, Context#{entry => "Main",
+                                    signatures => signatures(Functions, Records, Enums)}};
+                Error -> Error
+                end;
                 Error -> Error
             end;
         "Main" -> {error, duplicate_entry_point};
@@ -70,20 +76,24 @@ name_resolution_pass(#{functions := Functions} = Context) ->
     end.
 
 type_checking_pass(#{module_declaration_tokens := ModuleDeclarationTokens,
-                     functions := Functions, signatures := Signatures,
+                     records := Records, enums := Enums, functions := Functions,
+                     signatures := Signatures,
                      entry := Entry} = Context) ->
     case parse_module_declarations(ModuleDeclarationTokens, Signatures) of
         {ok, ModuleDeclarations, ModuleEnv} ->
-            type_check_functions(Functions, Signatures, Entry, ModuleDeclarations,
+            type_check_functions(Functions, Records, Enums, Signatures, Entry, ModuleDeclarations,
                                  ModuleEnv, Context);
         Error -> Error
     end.
 
-type_check_functions(Functions, Signatures, Entry, ModuleDeclarations, ModuleEnv, Context) ->
+type_check_functions(Functions, Records, Enums, Signatures, Entry,
+                     ModuleDeclarations, ModuleEnv, Context) ->
     case parse_bodies(Functions, Signatures, ModuleEnv, []) of
         {ok, Parsed} ->
             ParsedFunctions = lists:reverse(Parsed),
             Program = #{kind => program, entry => Entry,
+                        records => Records,
+                        enums => Enums,
                         module_declarations => ModuleDeclarations,
                         functions => ParsedFunctions},
             case duplicate_global_name(Program) of
@@ -167,35 +177,96 @@ find_function_name(Name, [{id, Name, _Span} | Rest]) -> {ok, Rest};
 find_function_name(_Name, [{lbrace, _Value, _Span} | _Rest]) -> not_found;
 find_function_name(Name, [_Token | Rest]) -> find_function_name(Name, Rest).
 
-parse_module_items([], Declarations, Functions) ->
-    {ok, lists:reverse(Declarations), lists:reverse(Functions)};
-parse_module_items([{keyword, function} | Rest], Declarations, Functions) ->
+parse_module_items([], Declarations, Records, Enums, Functions) ->
+    {ok, lists:reverse(Declarations), lists:reverse(Records),
+     lists:reverse(Enums), lists:reverse(Functions)};
+parse_module_items([{keyword, struct}, {id, Name}, {lbrace, "{"} | Rest],
+                   Declarations, Records, Enums, Functions) ->
+    case parse_record_fields(Rest, []) of
+        {ok, Fields, Remaining} ->
+            Record = #{kind => struct, name => Name, fields => Fields},
+            parse_module_items(Remaining, Declarations, [Record | Records], Enums, Functions);
+        Error -> Error
+    end;
+parse_module_items([{keyword, enum}, {id, Name}, {lbrace, "{"} | Rest],
+                   Declarations, Records, Enums, Functions) ->
+    case parse_enum_variants(Rest, []) of
+        {ok, Variants, Remaining} ->
+            Enum = #{kind => enum, name => Name, variants => Variants},
+            parse_module_items(Remaining, Declarations, Records, [Enum | Enums], Functions);
+        Error -> Error
+    end;
+parse_module_items([{keyword, function} | Rest], Declarations, Records, Enums, Functions) ->
     case parse_return_types(Rest) of
         {ok, Types, [{id, Name}, {lparen, "("} | ParamTokens]} ->
             case parse_function(Name, Types, ParamTokens) of
                 {ok, Function, Remaining} ->
-                    parse_module_items(Remaining, Declarations, [Function | Functions]);
+                    parse_module_items(Remaining, Declarations, Records, Enums,
+                                       [Function | Functions]);
                 Error -> Error
             end;
         {ok, _Types, Other} -> {error, {expected_function_name, Other}};
         Error -> Error
     end;
-parse_module_items([{keyword, global} | _] = Tokens, Declarations, Functions) ->
-    parse_module_declaration_tokens(Tokens, Declarations, Functions);
-parse_module_items([{keyword, const} | _] = Tokens, Declarations, Functions) ->
-    parse_module_declaration_tokens(Tokens, Declarations, Functions);
-parse_module_items([{keyword, Scope} | _] = Tokens, _Declarations, _Functions)
+parse_module_items([{keyword, global} | _] = Tokens, Declarations, Records, Enums, Functions) ->
+    parse_module_declaration_tokens(Tokens, Declarations, Records, Enums, Functions);
+parse_module_items([{keyword, const} | _] = Tokens, Declarations, Records, Enums, Functions) ->
+    parse_module_declaration_tokens(Tokens, Declarations, Records, Enums, Functions);
+parse_module_items([{keyword, Scope} | _] = Tokens,
+                   _Declarations, _Records, _Enums, _Functions)
   when Scope == local; Scope == temp ->
     {error, {variable_requires_scope, Scope, Tokens}};
-parse_module_items(Other, _Declarations, _Functions) ->
+parse_module_items(Other, _Declarations, _Records, _Enums, _Functions) ->
     {error, {expected_function_declaration, Other}}.
 
-parse_module_declaration_tokens(Tokens, Declarations, Functions) ->
+parse_module_declaration_tokens(Tokens, Declarations, Records, Enums, Functions) ->
     case take_statement(Tokens, 0, []) of
         {ok, Declaration, Rest} ->
-            parse_module_items(Rest, [Declaration | Declarations], Functions);
+            parse_module_items(Rest, [Declaration | Declarations], Records, Enums, Functions);
         Error -> Error
     end.
+
+parse_record_fields([{rbrace, "}"} | Rest], Acc) ->
+    Fields = lists:reverse(Acc),
+    case duplicate_name(Fields, []) of
+        none -> {ok, Fields, Rest};
+        Name -> {error, {duplicate_record_field, Name}}
+    end;
+parse_record_fields([{keyword, Type}, {id, Name}, {endofline, ";"} | Rest], Acc) ->
+    case is_type(Type) of
+        true -> parse_record_fields(Rest, [#{type => Type, name => Name} | Acc]);
+        false -> {error, {unknown_record_field_type, Type}}
+    end;
+parse_record_fields([{id, Type}, {id, Name}, {endofline, ";"} | Rest], Acc) ->
+    parse_record_fields(Rest, [#{type => {named, Type}, name => Name} | Acc]);
+parse_record_fields([], _Acc) ->
+    {error, unterminated_record_body};
+parse_record_fields(Other, _Acc) ->
+    {error, {expected_record_field, Other}}.
+
+parse_enum_variants([{rbrace, "}"} | Rest], Acc) ->
+    Variants = lists:reverse(Acc),
+    case duplicate_name(Variants, []) of
+        none -> {ok, Variants, Rest};
+        Name -> {error, {duplicate_enum_variant, Name}}
+    end;
+parse_enum_variants([{keyword, variant}, {id, Name}, {endofline, ";"} | Rest], Acc) ->
+    parse_enum_variants(Rest, [#{name => Name, fields => []} | Acc]);
+parse_enum_variants([{keyword, variant}, {id, Name}, {lparen, "("} | Rest], Acc) ->
+    case parse_parameters(Rest, []) of
+        {ok, Fields, [{endofline, ";"} | Remaining]} ->
+            case duplicate_name(Fields, []) of
+                none -> parse_enum_variants(Remaining,
+                                            [#{name => Name, fields => Fields} | Acc]);
+                Field -> {error, {duplicate_variant_field, Name, Field}}
+            end;
+        {ok, _Fields, Other} -> {error, {expected_endofline, Other}};
+        Error -> Error
+    end;
+parse_enum_variants([], _Acc) ->
+    {error, unterminated_enum_body};
+parse_enum_variants(Other, _Acc) ->
+    {error, {expected_enum_variant, Other}}.
 
 parse_function(Name, Types, Tokens) ->
     case parse_parameters(Tokens, []) of
@@ -236,6 +307,9 @@ validate_loop_binding_name(_Name) ->
 
 parse_return_types([{keyword, Type} | Rest]) ->
     checked_type(Type, [Type], Rest, unknown_return_type);
+parse_return_types([{id, Name}, {id, _FunctionName} | _] = Tokens) ->
+    [_TypeToken | Rest] = Tokens,
+    {ok, [{named, Name}], Rest};
 parse_return_types([{lparen, "("} | Rest]) ->
     parse_type_list(Rest, []);
 parse_return_types(Other) ->
@@ -248,6 +322,10 @@ parse_type_list([{keyword, Type}, {comma, ","} | Rest], Acc) ->
     end;
 parse_type_list([{keyword, Type}, {rparen, ")"} | Rest], Acc) ->
     checked_type(Type, lists:reverse([Type | Acc]), Rest, unknown_return_type);
+parse_type_list([{id, Name}, {comma, ","} | Rest], Acc) ->
+    parse_type_list(Rest, [{named, Name} | Acc]);
+parse_type_list([{id, Name}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([{named, Name} | Acc]), Rest};
 parse_type_list(Other, _Acc) ->
     {error, {expected_return_type, Other}}.
 
@@ -276,6 +354,10 @@ parse_parameters([{keyword, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
         true -> {ok, lists:reverse([#{type => Type, name => Name} | Acc]), Rest};
         false -> {error, {unknown_parameter_type, Type}}
     end;
+parse_parameters([{id, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
+    parse_parameters(Rest, [#{type => {named, Type}, name => Name} | Acc]);
+parse_parameters([{id, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([#{type => {named, Type}, name => Name} | Acc]), Rest};
 parse_parameters(Other, _Acc) ->
     {error, {expected_parameter, Other}}.
 
@@ -309,10 +391,44 @@ validate_main_function(Functions) ->
                      "function Number Main(String Args) { ... }"}}
     end.
 
-signatures(Functions) ->
-    maps:from_list(
-        [{maps:get(name, F), #{params => maps:get(params, F),
-                              return_types => maps:get(return_types, F)}} || F <- Functions]).
+signatures(Functions, Records, Enums) ->
+    FunctionSignatures =
+        [{maps:get(name, F), #{kind => function, params => maps:get(params, F),
+                              return_types => maps:get(return_types, F)}} || F <- Functions],
+    RecordSignatures =
+        [{maps:get(name, R), #{kind => struct, params => maps:get(fields, R),
+                              fields => maps:get(fields, R),
+                              return_types => [{named, maps:get(name, R)}]}} || R <- Records],
+    EnumSignatures =
+        [{maps:get(name, E), #{kind => enum, variants => maps:get(variants, E),
+                              return_types => [{named, maps:get(name, E)}]}} || E <- Enums],
+    maps:from_list(FunctionSignatures ++ RecordSignatures ++ EnumSignatures).
+
+validate_user_types(Records, Enums, Functions) ->
+    UserTypes = Records ++ Enums,
+    case duplicate_name(UserTypes, []) of
+        none ->
+            FunctionNames = [maps:get(name, F) || F <- Functions],
+            case [maps:get(name, T) || T <- UserTypes,
+                  lists:member(maps:get(name, T), FunctionNames)] of
+                [Name | _] -> {error, {duplicate_definition, Name}};
+                [] -> validate_declared_types(Records, Enums, Functions)
+            end;
+        Name -> {error, {duplicate_user_type, Name}}
+    end.
+
+validate_declared_types(Records, Enums, Functions) ->
+    Names = [maps:get(name, T) || T <- Records ++ Enums],
+    Types = [maps:get(type, Field) || R <- Records, Field <- maps:get(fields, R)] ++
+            [maps:get(type, Field) || E <- Enums, V <- maps:get(variants, E),
+                                      Field <- maps:get(fields, V)] ++
+            [Type || F <- Functions,
+                     Type <- maps:get(return_types, F) ++
+                             [maps:get(type, P) || P <- maps:get(params, F)]],
+    case [Name || {named, Name} <- Types, not lists:member(Name, Names)] of
+        [Name | _] -> {error, {unknown_user_type, Name}};
+        [] -> ok
+    end.
 
 env_from_bindings(Bindings) ->
     [maps:from_list(Bindings)].
@@ -453,12 +569,18 @@ parse_module_declarations([Tokens | Rest], Signatures, Env, Acc) ->
 parse_module_declaration([{keyword, const}, {keyword, Type}, {id, Name},
                           {equals, "="} | ValueTokens], Signatures, Env) ->
     parse_declaration_value(const, const, Type, Name, ValueTokens, Signatures, Env);
+parse_module_declaration([{keyword, const}, {id, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Signatures, Env) ->
+    parse_declaration_value(const, const, {named, Type}, Name, ValueTokens, Signatures, Env);
 parse_module_declaration([{keyword, const}, {id, Name}, {equals, "="} | ValueTokens],
                          Signatures, Env) ->
     parse_declaration_value(const, const, var, Name, ValueTokens, Signatures, Env);
 parse_module_declaration([{keyword, global}, {keyword, Type}, {id, Name},
                           {equals, "="} | ValueTokens], Signatures, Env) ->
     parse_module_global_value(runtime, Type, Name, ValueTokens, Signatures, Env);
+parse_module_declaration([{keyword, global}, {id, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Signatures, Env) ->
+    parse_module_global_value(runtime, {named, Type}, Name, ValueTokens, Signatures, Env);
 parse_module_declaration([{keyword, global}, {keyword, Modifier}, {keyword, Type},
                           {id, Name}, {equals, "="} | ValueTokens],
                          Signatures, Env)
@@ -572,7 +694,7 @@ parse_statements([{keyword, 'try'} | _] = Tokens, F, Sigs, Env, Acc) ->
         Error -> Error
     end;
 parse_statements([{id, Name}, {endofline, ";"} | Rest], F, Sigs, Env, Acc) ->
-    case validate_call(Name, [], Sigs, Env) of
+    case validate_user_function(Name, [], Sigs, Env) of
         {ok, _} ->
             Stmt = #{kind => call, name => Name, args => [], invocation => once},
             parse_statements(Rest, F, Sigs, Env, [Stmt | Acc]);
@@ -597,6 +719,15 @@ parse_statements([{keyword, Scope}, {keyword, Type}, {id, Name}, {comma, ","} | 
                  F, Sigs, Env, Acc)
   when Scope == global; Scope == local; Scope == temp ->
     case parse_bindings(Rest, [{Type, Name}]) of
+        {ok, Bindings, [{equals, "="} | ValueTokens]} ->
+            bind_multiple(Scope, Bindings, ValueTokens, F, Sigs, Env, Acc);
+        {ok, _Bindings, Other} -> {error, {expected_equals, Other}};
+        Error -> Error
+    end;
+parse_statements([{keyword, Scope}, {id, Type}, {id, Name}, {comma, ","} | Rest],
+                 F, Sigs, Env, Acc)
+  when Scope == global; Scope == local; Scope == temp ->
+    case parse_bindings(Rest, [{{named, Type}, Name}]) of
         {ok, Bindings, [{equals, "="} | ValueTokens]} ->
             bind_multiple(Scope, Bindings, ValueTokens, F, Sigs, Env, Acc);
         {ok, _Bindings, Other} -> {error, {expected_equals, Other}};
@@ -880,6 +1011,14 @@ parse_bindings([{keyword, Type}, {id, Name} | Rest], Acc) ->
             end;
         Error -> Error
     end;
+parse_bindings([{id, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
+    parse_bindings(Rest, [{{named, Type}, Name} | Acc]);
+parse_bindings([{id, Type}, {id, Name} | Rest], Acc) ->
+    Bindings = lists:reverse([{{named, Type}, Name} | Acc]),
+    case validate_binding_names(Bindings) of
+        ok -> {ok, Bindings, Rest};
+        Error -> Error
+    end;
 parse_bindings(Other, _Acc) ->
     {error, {expected_multi_binding, Other}}.
 
@@ -926,6 +1065,9 @@ parse_scoped_statement(Tokens, F, Sigs, Env, Acc) ->
 parse_scoped_declaration([{keyword, Scope}, {keyword, Type}, {id, Name},
                           {equals, "="} | ValueTokens], Sigs, Env) ->
     parse_declaration_value(Scope, runtime, Type, Name, ValueTokens, Sigs, Env);
+parse_scoped_declaration([{keyword, Scope}, {id, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Sigs, Env) ->
+    parse_declaration_value(Scope, runtime, {named, Type}, Name, ValueTokens, Sigs, Env);
 parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {keyword, Type},
                           {id, Name}, {equals, "="} | ValueTokens], Sigs, Env)
   when Modifier == lazy; Modifier == const; Modifier == computed;
@@ -991,6 +1133,14 @@ parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {comma, ","} | Rest],
     parse_parenthesized_bindings(Rest, [{Type, Name} | Acc]);
 parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
     Bindings = lists:reverse([{Type, Name} | Acc]),
+    case validate_binding_names(Bindings) of
+        ok -> {ok, Bindings, Rest};
+        Error -> Error
+    end;
+parse_parenthesized_bindings([{id, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
+    parse_parenthesized_bindings(Rest, [{{named, Type}, Name} | Acc]);
+parse_parenthesized_bindings([{id, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
+    Bindings = lists:reverse([{{named, Type}, Name} | Acc]),
     case validate_binding_names(Bindings) of
         ok -> {ok, Bindings, Rest};
         Error -> Error
@@ -1074,7 +1224,7 @@ parse_expr(Tokens, Sigs, Env) ->
 parse_pipe_rest(Left, [{pipe_op, "|>"} | Rest], Sigs, Env) ->
     case parse_pipe_target(Rest, Sigs, Env) of
         {ok, Name, Args, Remaining} ->
-            case validate_call(Name, [Left | Args], Sigs, Env) of
+            case validate_user_function(Name, [Left | Args], Sigs, Env) of
                 {ok, _Types} ->
                     parse_pipe_rest({pipe_call, Left, Name, Args}, Remaining, Sigs, Env);
                 Error -> Error
@@ -1199,6 +1349,9 @@ parse_primary([{keyword, V} | Rest], _Sigs, _Env) when V == null; V == nil ->
     {ok, null, Rest};
 parse_primary([{atomprefix, ":"}, {id, Name} | Rest], _Sigs, _Env) ->
     {ok, {atom, list_to_atom(Name)}, Rest};
+parse_primary([{id, EnumName}, {dot, "."}, {id, VariantName},
+               {lparen, "("} | Rest], Sigs, Env) ->
+    parse_variant_call(EnumName, VariantName, Rest, Sigs, Env);
 parse_primary([{id, Name}, {lparen, "("} | Rest], Sigs, Env) ->
     parse_call(Name, Rest, Sigs, Env);
 parse_primary([{keyword, Name}, {lparen, "("} | Rest], Sigs, Env) ->
@@ -1228,17 +1381,61 @@ parse_group(Tokens, Sigs, Env) ->
 
 parse_call(Name, [{rparen, ")"} | Rest], Sigs, Env) ->
     case validate_call(Name, [], Sigs, Env) of
-        {ok, _} -> {ok, {call, Name, []}, Rest};
+        {ok, _} -> {ok, call_expression(Name, [], Sigs), Rest};
         Error -> Error
     end;
 parse_call(Name, Tokens, Sigs, Env) ->
     case parse_sequence(Tokens, rparen, call_args, [], Sigs, Env) of
         {ok, {call_args, Args}, Rest} ->
             case validate_call(Name, Args, Sigs, Env) of
-                {ok, _} -> {ok, {call, Name, Args}, Rest};
+                {ok, _} -> {ok, call_expression(Name, Args, Sigs), Rest};
                 Error -> Error
             end;
         Error -> Error
+    end.
+
+call_expression(Name, Args, Sigs) when is_list(Name) ->
+    case maps:find(Name, Sigs) of
+        {ok, #{kind := struct, fields := Fields}} ->
+            {record, Name, lists:zip([maps:get(name, Field) || Field <- Fields], Args)};
+        _ -> {call, Name, Args}
+    end;
+call_expression(Name, Args, _Sigs) ->
+    {call, Name, Args}.
+
+parse_variant_call(EnumName, VariantName, [{rparen, ")"} | Rest], Sigs, Env) ->
+    build_variant(EnumName, VariantName, [], Rest, Sigs, Env);
+parse_variant_call(EnumName, VariantName, Tokens, Sigs, Env) ->
+    case parse_sequence(Tokens, rparen, call_args, [], Sigs, Env) of
+        {ok, {call_args, Args}, Rest} ->
+            build_variant(EnumName, VariantName, Args, Rest, Sigs, Env);
+        Error -> Error
+    end.
+
+build_variant(EnumName, VariantName, Args, Rest, Sigs, Env) ->
+    case maps:find(EnumName, Sigs) of
+        {ok, #{kind := enum, variants := Variants}} ->
+            case [Variant || Variant <- Variants,
+                             maps:get(name, Variant) == VariantName] of
+                [#{fields := Fields}] ->
+                    Expected = [maps:get(type, Field) || Field <- Fields],
+                    case expression_types(Args, Sigs, Env, []) of
+                        {ok, Actual} ->
+                            case types_accept(Expected, Actual) of
+                                true ->
+                                    Values = lists:zip(
+                                        [maps:get(name, Field) || Field <- Fields], Args),
+                                    {ok, {variant, EnumName, VariantName, Values}, Rest};
+                                false ->
+                                    {error, {variant_type_mismatch, EnumName, VariantName,
+                                             Expected, Actual}}
+                            end;
+                        Error -> Error
+                    end;
+                [] -> {error, {unknown_enum_variant, EnumName, VariantName}}
+            end;
+        {ok, _Other} -> {error, {not_an_enum, EnumName}};
+        error -> {error, {unknown_enum, EnumName}}
     end.
 
 parse_sequence([{Close, _} | Rest], Close, Kind, Acc, _Sigs, _Env) ->
@@ -1283,6 +1480,7 @@ validate_call(Name, Args, Sigs, Env)
     validate_numeric_conversion(Name, Args, Sigs, Env);
 validate_call(Name, Args, Sigs, Env) when is_list(Name) ->
     case maps:find(Name, Sigs) of
+        {ok, #{kind := enum}} -> {error, {enum_variant_required, Name}};
         {ok, #{params := Params, return_types := Returns}} ->
             Expected = [maps:get(type, P) || P <- Params],
             case expression_types(Args, Sigs, Env, []) of
@@ -1303,6 +1501,14 @@ validate_call(Name, Args, Sigs, Env) when is_atom(Name) ->
                 Error -> Error
             end;
         false -> {error, {unknown_function, Name}}
+    end.
+
+validate_user_function(Name, Args, Sigs, Env) ->
+    case maps:find(Name, Sigs) of
+        {ok, #{kind := function}} -> validate_call(Name, Args, Sigs, Env);
+        {ok, #{kind := Kind}} when Kind == struct; Kind == enum ->
+            {error, {function_call_required, Name}};
+        error -> validate_call(Name, Args, Sigs, Env)
     end.
 
 validate_numeric_conversion(Target, [Arg], Sigs, Env) ->
@@ -1369,6 +1575,8 @@ infer_types({atom, _}, _Sigs, _Env) -> {ok, [atom]};
 infer_types({list, _}, _Sigs, _Env) -> {ok, [list]};
 infer_types({tuple, _}, _Sigs, _Env) -> {ok, [tuple]};
 infer_types({map, _}, _Sigs, _Env) -> {ok, [map]};
+infer_types({record, Name, _Fields}, _Sigs, _Env) -> {ok, [{named, Name}]};
+infer_types({variant, Name, _Variant, _Fields}, _Sigs, _Env) -> {ok, [{named, Name}]};
 infer_types({member, Value, Name}, Sigs, Env) ->
     case single_type(Value, Sigs, Env) of
         {ok, Type} when (Type == map orelse Type == restricted_map), Name == "count" ->
@@ -1376,6 +1584,7 @@ infer_types({member, Value, Name}, Sigs, Env) ->
         {ok, Type} when (Type == map orelse Type == restricted_map), Name == "members" ->
             {ok, [list]};
         {ok, Type} when Type == map; Type == restricted_map -> {ok, [var]};
+        {ok, {named, TypeName}} -> named_field_type(TypeName, Name, Sigs);
         {ok, _Type} -> {ok, [var]};
         Error -> Error
     end;
@@ -1400,6 +1609,28 @@ infer_types({unary, Op, Value}, Sigs, Env) ->
         {error, Reason} -> {error, Reason}
     end;
 infer_types(_Expr, _Sigs, _Env) -> {error, unknown_type}.
+
+named_field_type(TypeName, FieldName, Sigs) ->
+    case maps:find(TypeName, Sigs) of
+        {ok, #{kind := struct, fields := Fields}} ->
+            case [maps:get(type, Field) || Field <- Fields,
+                  maps:get(name, Field) == FieldName] of
+                [Type] -> {ok, [Type]};
+                [] -> {error, {unknown_record_field, TypeName, FieldName}}
+            end;
+        {ok, #{kind := enum}} when FieldName == "tag" ->
+            {ok, [atom]};
+        {ok, #{kind := enum, variants := Variants}} ->
+            Types = lists:usort(
+                [maps:get(type, Field) || Variant <- Variants,
+                 Field <- maps:get(fields, Variant), maps:get(name, Field) == FieldName]),
+            case Types of
+                [Type] -> {ok, [Type]};
+                [] -> {error, {unknown_enum_field, TypeName, FieldName}};
+                _ -> {ok, [var]}
+            end;
+        _ -> {error, {unknown_user_type, TypeName}}
+    end.
 
 binary_type(plus, string, string) -> {ok, [string]};
 binary_type(div_op, Left, Right) ->

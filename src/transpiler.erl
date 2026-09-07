@@ -420,6 +420,17 @@ expression({map, Pairs}, Env) ->
     Entries = [[expression(Key, Env), " => ", expression(Value, Env)]
                || {Key, Value} <- Pairs],
     ["#{", lists:join(", ", Entries), "}"];
+expression({record, Name, Fields}, Env) ->
+    Entries = [[io_lib:format("~p", [list_to_atom(Field)]), " => ", expression(Value, Env)]
+               || {Field, Value} <- Fields],
+    ["#{'$terra_struct' => ", io_lib:format("~p", [list_to_atom(Name)]),
+     case Entries of [] -> ""; _ -> [", ", lists:join(", ", Entries)] end, "}"];
+expression({variant, EnumName, VariantName, Fields}, Env) ->
+    Entries = [[io_lib:format("~p", [list_to_atom(Field)]), " => ", expression(Value, Env)]
+               || {Field, Value} <- Fields],
+    ["#{'$terra_enum' => ", io_lib:format("~p", [list_to_atom(EnumName)]),
+     ", tag => ", io_lib:format("~p", [list_to_atom(VariantName)]),
+     case Entries of [] -> ""; _ -> [", ", lists:join(", ", Entries)] end, "}"];
 expression({var_ref, Name}, Env) ->
     case maps:find(Name, Env) of
         {ok, {direct, ErlangName}} -> ErlangName;

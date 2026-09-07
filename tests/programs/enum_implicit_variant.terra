@@ -1,0 +1,7 @@
+enum Result {
+    Ok(Int value);
+}
+
+function Number Main(String Args) {
+    return 0;
+}
