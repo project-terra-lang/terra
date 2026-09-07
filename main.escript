@@ -185,9 +185,5 @@ print_warnings(Path, [Warning | Rest]) ->
     io:put_chars(diagnostics:render_warning(Path, Warning)),
     print_warnings(Path, Rest).
 
-print_error(Path, bad_extension) ->
-    io:format("terra: ~s: expected a .terra file~n", [Path]);
-print_error(Path, {read_failed, Reason}) ->
-    io:format("terra: ~s: could not read file: ~p~n", [Path, Reason]);
 print_error(Path, Reason) ->
     io:put_chars(diagnostics:render(Path, Reason)).

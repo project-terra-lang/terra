@@ -65,6 +65,9 @@ for their member count and `.members` for a list of key/value tuples.
 - Functions must always declare a concrete return type and return a value.
 - Terra has no `void` functions.
 - `name();` invokes a function normally and can run it multiple times.
+- `try name();` invokes a user function with explicit failure propagation:
+  successful values are unchanged, while failures retain their BEAM reason and
+  Terra stack. Bare calls remain valid in language version 0.
 - `name;` invokes a zero-argument function successfully at most once per
   generated module and BEAM process; `name()` always invokes normally.
 - Terra programs run through one fixed entry point:
@@ -160,6 +163,8 @@ available for a future standard-library function.
 5. Developer Feedback
 - `terra check file.terra` reports a stable error code, a plain-language
   explanation, and a suggested fix.
+- Diagnostic codes are lower-snake-case identifiers shown in brackets, such as
+  `[missing_return]`; tools may rely on the code even when wording changes.
 - Successful checks report non-failing warnings for unused variables,
   unused parameters, shadowing, and ignored function return values.
 - `terra explain file.terra` prints a readable walkthrough of functions,
@@ -173,6 +178,8 @@ available for a future standard-library function.
   the BEAM VM.
 - Generated BEAM debug metadata preserves Terra source paths and function
   locations so runtime diagnostics show Terra code frames.
+- Repeated compilation of the same source path produces byte-identical Erlang
+  source and deterministic BEAM output.
 - `TERRA_BUILD_DIR` can override the default `terra_build/` output directory.
 - Terra multiple returns compile to Erlang tuples, immutable locals compile to
   Erlang single-assignment variables, and calls returned directly from a

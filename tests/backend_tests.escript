@@ -4,8 +4,11 @@ main(_Args) ->
     code:add_pathz("./ebin"),
     Path = "tests/programs/backend_run.terra",
     OutDir = "/tmp/terra_backend_tests",
-    Results = [test_codegen_pass(Path), test_transpile(Path), test_compile(Path, OutDir), test_run(Path, OutDir),
+    Results = [test_codegen_pass(Path), test_transpile(Path),
+               test_deterministic_output(Path, OutDir),
+               test_compile(Path, OutDir), test_run(Path, OutDir),
                test_short_circuit(OutDir), test_numeric_rules(OutDir),
+               test_try_success(OutDir), test_try_failure(OutDir),
                test_tail_recursion(OutDir),
                test_once_semantics(OutDir), test_once_failure(OutDir),
                test_once_reentrancy(OutDir),
@@ -51,6 +54,27 @@ test_transpile(Path) ->
             io:format("not ok - transpile~n  got: ~p~n", [Other]),
             fail
     end.
+
+test_deterministic_output(Path, OutDir) ->
+    FirstSource = transpiler:transpile_file(Path),
+    SecondSource = transpiler:transpile_file(Path),
+    FirstCompile = transpiler:compile_file(Path, OutDir),
+    FirstBeam = beam_contents(FirstCompile),
+    SecondCompile = transpiler:compile_file(Path, OutDir),
+    SecondBeam = beam_contents(SecondCompile),
+    case {FirstSource, SecondSource, FirstBeam, SecondBeam} of
+        {{ok, Module, Source1}, {ok, Module, Source2},
+         {ok, Beam1}, {ok, Beam2}} ->
+            expect("deterministic compiler output",
+                   iolist_to_binary(Source1) == iolist_to_binary(Source2) andalso
+                   Beam1 == Beam2);
+        Other ->
+            io:format("not ok - deterministic compiler output~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+beam_contents({ok, _Module, BeamPath, _ErlangPath}) -> file:read_file(BeamPath);
+beam_contents(Error) -> Error.
 
 test_compile(Path, OutDir) ->
     case transpiler:compile_file(Path, OutDir) of
@@ -98,6 +122,31 @@ test_numeric_rules(OutDir) ->
         Other ->
             io:format("not ok - numeric conversions and mixed arithmetic~n  got: ~p~n",
                       [Other]),
+            fail
+    end.
+
+test_try_success(OutDir) ->
+    Path = "tests/programs/try_success.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_try_success, Source},
+         {ok, terra_try_success, 5, _BeamPath, _ErlangPath}} ->
+            expect("try returns successful function values",
+                   contains(iolist_to_binary(Source),
+                            <<"terra_try(fun() -> terra_fn_add(2, 3) end)">>));
+        Other ->
+            io:format("not ok - try returns successful function values~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_try_failure(OutDir) ->
+    Path = "tests/programs/try_failure.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {error, {runtime_error, error, badarith, Stacktrace}} ->
+            expect("try propagates function failures",
+                   has_terra_frame(Stacktrace, Path));
+        Other ->
+            io:format("not ok - try propagates function failures~n  got: ~p~n", [Other]),
             fail
     end.
 
@@ -279,10 +328,15 @@ test_source_map(OutDir) ->
 
 has_terra_frame(Stacktrace, Path) ->
     lists:any(fun({_Module, _Function, _Arity, Info}) ->
-                      proplists:get_value(file, Info) == Path andalso
+                      FramePath = proplists:get_value(file, Info),
+                      same_source_path(FramePath, Path) andalso
                       proplists:get_value(line, Info, 0) > 0;
                  (_) -> false
               end, Stacktrace).
+
+same_source_path(FramePath, Path) when is_list(FramePath) ->
+    FramePath == Path orelse filename:basename(FramePath) == filename:basename(Path);
+same_source_path(_FramePath, _Path) -> false.
 
 expect(Name, true) ->
     io:format("ok - ~s~n", [Name]),

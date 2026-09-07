@@ -28,14 +28,18 @@ format_statements(Statements, FunctionName, Indent) ->
 
 format_statement(#{kind := call, name := stdout}, _FunctionName, Indent) ->
     [spaces(Indent), "- writes a value to the console with stdout\n"];
-format_statement(#{kind := call, name := Name, invocation := Invocation},
+format_statement(#{kind := call, name := Name, invocation := Invocation} = Statement,
                  FunctionName, Indent) ->
     Recursive = case display_name(Name) == FunctionName of
                     true -> ", recursive";
                     false -> ""
                 end,
+    Propagation = case maps:get(propagation, Statement, normal) of
+                      'try' -> " with explicit try propagation";
+                      normal -> ""
+                  end,
     [spaces(Indent), "- calls ", display_name(Name), " ",
-     invocation(Invocation), Recursive, "\n"];
+     invocation(Invocation), Propagation, Recursive, "\n"];
 format_statement(#{kind := return, values := Values}, _FunctionName, Indent) ->
     Count = length(Values),
     [spaces(Indent), io_lib:format("- returns ~p ~s\n", [Count, plural(Count, "value")])];

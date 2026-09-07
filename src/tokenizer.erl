@@ -17,6 +17,7 @@ keyword(<<"stdout">>) -> {ok, stdout};
 keyword(<<"function">>) -> {ok, function};
 keyword(<<"fn">>)     -> {ok, fn};
 keyword(<<"return">>) -> {ok, return};
+keyword(<<"try">>)    -> {ok, 'try'};
 keyword(<<"let">>)    -> {ok, 'let'};
 keyword(<<"global">>) -> {ok, global};
 keyword(<<"local">>)  -> {ok, local};

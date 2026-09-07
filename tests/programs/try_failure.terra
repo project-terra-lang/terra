@@ -1,0 +1,11 @@
+function Float Divide(Int value) {
+    return value / 0;
+}
+
+function Float Forward(Int value) {
+    return try Divide(value);
+}
+
+function Number Main(String Args) {
+    return try Forward(4);
+}

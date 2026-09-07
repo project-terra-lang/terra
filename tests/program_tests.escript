@@ -100,6 +100,10 @@ main(_Args) ->
               fun expect_restricted_map/1},
              {"restricted map capacity", "tests/programs/restricted_map_overflow.terra",
               fun expect_restricted_map_overflow/1},
+             {"try propagation expressions", "tests/programs/try_success.terra",
+              fun expect_try_propagation/1},
+             {"try requires function call", "tests/programs/try_invalid.terra",
+              fun expect_invalid_try/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -163,6 +167,24 @@ expect_restricted_map(_) ->
 expect_restricted_map_overflow({error, {in_function, "Main",
                                         {restricted_map_capacity_exceeded, 1, 2}}}) -> true;
 expect_restricted_map_overflow(_) -> false.
+
+expect_try_propagation({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    Statements = maps:get(statements, Main),
+    lists:any(fun(Statement) ->
+        maps:get(kind, Statement, none) == variable andalso
+        maps:get(value, Statement, none) == {try_call, "Add", [{int, 2}, {int, 3}]}
+    end, Statements) andalso
+    lists:any(fun(Statement) ->
+        maps:get(kind, Statement, none) == call andalso
+        maps:get(name, Statement, none) == "Observe" andalso
+        maps:get(propagation, Statement, normal) == 'try'
+    end, Statements);
+expect_try_propagation(_) -> false.
+
+expect_invalid_try({error, {in_function, "Main",
+                            {try_requires_function_call, {int, 1}}}}) -> true;
+expect_invalid_try(_) -> false.
 
 find_function(Name, Functions) ->
     hd([Function || Function <- Functions, maps:get(name, Function) == Name]).
@@ -336,10 +358,19 @@ expect_atomic_number_invalid(
 expect_atomic_number_invalid(_) -> false.
 
 expect_warnings({ok, Program}) ->
-    Codes = [maps:get(code, Warning) || Warning <- maps:get(warnings, Program)],
+    Warnings = maps:get(warnings, Program),
+    Codes = [maps:get(code, Warning) || Warning <- Warnings],
+    Repeated = [begin
+                    {ok, Again} = program:parse_file("tests/programs/warnings.terra"),
+                    maps:get(warnings, Again)
+                end || _ <- lists:seq(1, 5)],
     lists:all(fun(Code) -> lists:member(Code, Codes) end,
               [unused_variable, unused_parameter, shadowed_variable,
-               ignored_return_value]);
+               ignored_return_value]) andalso
+    lists:all(fun(AgainWarnings) -> AgainWarnings == Warnings end, Repeated) andalso
+    diagnostics:code({in_function, "Main", {missing_return, [number]}}) ==
+        missing_return andalso
+    diagnostics:warning_code(hd(Warnings)) == maps:get(code, hd(Warnings));
 expect_warnings(_) -> false.
 
 expect_complete_ast({ok, Program}) ->

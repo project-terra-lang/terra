@@ -444,6 +444,15 @@ parse_statements([{id, Name}, {lparen, "("} | Rest], F, Sigs, Env, Acc) ->
     parse_call_statement(Name, Rest, F, Sigs, Env, Acc);
 parse_statements([{keyword, stdout}, {lparen, "("} | Rest], F, Sigs, Env, Acc) ->
     parse_call_statement(stdout, Rest, F, Sigs, Env, Acc);
+parse_statements([{keyword, 'try'} | _] = Tokens, F, Sigs, Env, Acc) ->
+    case parse_expr(Tokens, Sigs, Env) of
+        {ok, {try_call, Name, Args}, [{endofline, ";"} | Remaining]} ->
+            Stmt = #{kind => call, name => Name, args => Args,
+                     invocation => repeated, propagation => 'try'},
+            parse_statements(Remaining, F, Sigs, Env, [Stmt | Acc]);
+        {ok, _Value, Other} -> {error, {expected_endofline, Other}};
+        Error -> Error
+    end;
 parse_statements([{id, Name}, {endofline, ";"} | Rest], F, Sigs, Env, Acc) ->
     case validate_call(Name, [], Sigs, Env) of
         {ok, _} ->
@@ -1024,6 +1033,13 @@ parse_unary([{bang, "!"} | Rest], Sigs, Env) ->
         {ok, Value, Remaining} -> {ok, {unary, bang, Value}, Remaining};
         Error -> Error
     end;
+parse_unary([{keyword, 'try'} | Rest], Sigs, Env) ->
+    case parse_unary(Rest, Sigs, Env) of
+        {ok, {call, Name, Args}, Remaining} when is_list(Name) ->
+            {ok, {try_call, Name, Args}, Remaining};
+        {ok, Value, _Remaining} -> {error, {try_requires_function_call, Value}};
+        Error -> Error
+    end;
 parse_unary(Tokens, Sigs, Env) ->
     parse_primary(Tokens, Sigs, Env).
 
@@ -1222,6 +1238,7 @@ infer_types({var_ref, Name}, _Sigs, Env) ->
         {ok, Type} -> {ok, [Type]};
         error -> {error, {unknown_variable, Name}}
     end;
+infer_types({try_call, Name, Args}, Sigs, Env) -> validate_call(Name, Args, Sigs, Env);
 infer_types({call, Name, Args}, Sigs, Env) -> validate_call(Name, Args, Sigs, Env);
 infer_types({binary, Op, Left, Right}, Sigs, Env) ->
     case {single_type(Left, Sigs, Env), single_type(Right, Sigs, Env)} of

@@ -1,11 +1,27 @@
 -module(diagnostics).
--export([format/1, render/2, render_warning/2]).
+-export([code/1, warning_code/1, format/1, render/2, render_warning/2]).
+
+code(Reason) ->
+    {Code, _Message, _Help} = format(Reason),
+    Code.
+
+warning_code(Warning) ->
+    {Code, _Message, _Help} = format_warning(Warning),
+    Code.
 
 format({in_function, Name, Reason}) ->
     {Code, Message, Help} = format(Reason),
     {Code, io_lib:format("In function ~s: ~s", [Name, Message]), Help};
 format({with_span, Reason, _Span}) ->
     format(Reason);
+format(bad_extension) ->
+    {bad_extension,
+     "The input file does not have the .terra extension.",
+     "Pass a Terra source file whose name ends in .terra."};
+format({read_failed, Reason}) ->
+    {read_failed,
+     io_lib:format("The source file could not be read: ~p.", [Reason]),
+     "Check that the path exists and is readable."};
 format(missing_entry_point) ->
     {missing_entry_point,
      "No Main function was found.",
@@ -147,6 +163,10 @@ format({restricted_map_capacity_exceeded, Capacity, Count}) ->
      io_lib:format("RestrictedMap capacity is ~p, but its initializer has ~p members.",
                    [Capacity, Count]),
      "Increase the capacity or remove members from the initializer."};
+format({try_requires_function_call, _Value}) ->
+    {try_requires_function_call,
+     "try must be followed by a user-function call.",
+     "Write try Function(arguments); constructors and ordinary values do not need try."};
 format(null_not_allowed) ->
     {null_not_allowed,
      "null and nil are not valid variable values.",
@@ -222,15 +242,19 @@ format(Reason) ->
 
 render(Path, Reason) ->
     {Code, Message, Help} = format(Reason),
-    Title = lists:flatten(
-        string:uppercase(string:replace(atom_to_list(Code), "_", " ", all))),
+    Title = diagnostic_title(Code),
     render_formatted(Path, Reason, Title, Message, Help).
 
 render_warning(Path, Warning) ->
     {Code, Message, Help} = format_warning(Warning),
     Label = string:uppercase(string:replace(atom_to_list(Code), "_", " ", all)),
     Reason = warning_reason(Warning),
-    render_formatted(Path, Reason, lists:flatten(["WARNING ", Label]), Message, Help).
+    Title = lists:flatten(["WARNING ", Label, " [", atom_to_list(Code), "]"]),
+    render_formatted(Path, Reason, Title, Message, Help).
+
+diagnostic_title(Code) ->
+    Label = string:uppercase(string:replace(atom_to_list(Code), "_", " ", all)),
+    lists:flatten([Label, " [", atom_to_list(Code), "]"]).
 
 render_formatted(Path, Reason, Title, Message, Help) ->
     case file:read_file(Path) of

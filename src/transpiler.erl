@@ -35,7 +35,8 @@ compile_file(Path, OutDir) ->
     case emit_file(Path, ErlangPath) of
         {ok, Module, _} ->
             ok = filelib:ensure_dir(filename:join(OutDir, "placeholder")),
-            case compile:file(ErlangPath, [debug_info, return_errors, return_warnings,
+            case compile:file(ErlangPath, [debug_info, deterministic,
+                                           return_errors, return_warnings,
                                            {outdir, OutDir}]) of
                 {ok, Module} -> {ok, Module, BeamPath, ErlangPath};
                 {ok, Module, _Warnings} -> {ok, Module, BeamPath, ErlangPath};
@@ -155,6 +156,8 @@ tail_dispatch_clause(Target, Arity) ->
 
 tail_calls(#{kind := return, values := [{call, Name, Args}]}) when is_list(Name) ->
     [{Name, length(Args)}];
+tail_calls(#{kind := return, values := [{try_call, Name, Args}]}) ->
+    [{Name, length(Args)}];
 tail_calls(Value) when is_map(Value) ->
     lists:append([tail_calls(Child) || Child <- maps:values(Value)]);
 tail_calls(Value) when is_list(Value) ->
@@ -232,16 +235,27 @@ generate_statement(#{kind := call, name := stdout, args := Args},
     {[indent(Level), "terra_stdout([", lists:join(", ", Values), "])"],
      Env, Counter};
 generate_statement(#{kind := call, name := Name, args := Args,
-                     invocation := Invocation}, Env, Counter, Level, _FunctionName) ->
+                     invocation := Invocation} = Statement,
+                   Env, Counter, Level, _FunctionName) ->
     Call = function_call(Name, Args, Env),
-    Code = case Invocation of
-               once -> ["terra_once(", io_lib:format("~p", [Name]),
-                        ", fun() -> ", Call, " end)"];
-               repeated -> Call
+    Invoked = case Invocation of
+                  once -> ["terra_once(", io_lib:format("~p", [Name]),
+                           ", fun() -> ", Call, " end)"];
+                  repeated -> Call
+              end,
+    Code = case maps:get(propagation, Statement, normal) of
+               'try' -> ["terra_try(fun() -> ", Invoked, " end)"];
+               normal -> Invoked
            end,
     {[indent(Level), Code], Env, Counter};
 generate_statement(#{kind := return, values := [{call, Name, Args}]}, Env, Counter,
                    Level, _FunctionName) when is_list(Name) ->
+    TailArgs = [expression(Arg, Env) || Arg <- Args],
+    Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
+            lists:join(", ", TailArgs), "]})"],
+    {[indent(Level), Code], Env, Counter};
+generate_statement(#{kind := return, values := [{try_call, Name, Args}]}, Env, Counter,
+                   Level, _FunctionName) ->
     TailArgs = [expression(Arg, Env) || Arg <- Args],
     Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
             lists:join(", ", TailArgs), "]})"],
@@ -393,6 +407,8 @@ expression({unary, minus, Value}, Env) ->
     ["(-", expression(Value, Env), ")"];
 expression({binary, Op, Left, Right}, Env) ->
     ["(", expression(Left, Env), " ", operator(Op), " ", expression(Right, Env), ")"];
+expression({try_call, Name, Args}, Env) ->
+    ["terra_try(fun() -> ", function_call(Name, Args, Env), " end)"];
 expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
 
 function_call(Name, Args, Env) when is_list(Name) ->
@@ -559,6 +575,11 @@ runtime_helpers() ->
     "            end;\n"
     "        running -> erlang:error({terra_once_reentrant, Key});\n"
     "        {done, Value} -> Value\n"
+    "    end.\n\n"
+    "terra_try(Fun) ->\n"
+    "    try Fun()\n"
+    "    catch\n"
+    "        Class:Reason:Stacktrace -> erlang:raise(Class, Reason, Stacktrace)\n"
     "    end.\n\n"
     "terra_range(Limit) when Limit =< 0 -> [];\n"
     "terra_range(Limit) -> lists:seq(0, trunc(Limit) - 1).\n\n"

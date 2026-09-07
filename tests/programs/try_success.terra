@@ -1,0 +1,13 @@
+function Int Add(Int left, Int right) {
+    return left + right;
+}
+
+function Int Observe(Int value) {
+    return value;
+}
+
+function Number Main(String Args) {
+    local Int value = try Add(2, 3);
+    try Observe(value);
+    return value;
+}

@@ -86,7 +86,9 @@ analyze_exprs(Values, State) -> lists:foldl(fun analyze_expr/2, State, Values).
 enter_scope(State) -> State#{scopes := [#{} | maps:get(scopes, State)]}.
 
 leave_scope(#{scopes := [Scope | Rest]} = State) ->
-    State1 = lists:foldl(fun finalize_binding/2, State, maps:values(Scope)),
+    %% Binding ids follow declaration order; never inherit map iteration order.
+    BindingIds = lists:sort(maps:values(Scope)),
+    State1 = lists:foldl(fun finalize_binding/2, State, BindingIds),
     State1#{scopes := Rest}.
 
 declare(Name, Kind, WarnShadow, State) ->

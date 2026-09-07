@@ -35,6 +35,10 @@ a synthetic file. BEAM stack traces therefore retain Terra frames, and
 `terra run` uses the mapped function boundary to render the nearest executable
 Terra source line when a runtime failure occurs.
 
+Compiler output is deterministic for the same source and path. Code generation
+preserves source declaration order, warning analysis finalizes bindings in
+declaration order, and BEAM compilation uses Erlang's deterministic mode.
+
 ## Lexical Rules
 
 Whitespace separates tokens and has no meaning outside strings and character
@@ -267,6 +271,21 @@ List()
 State()
 ```
 
+`try` may prefix a user-function call in any expression position or as a
+standalone call:
+
+```terra
+local Int value = try LoadValue();
+try Record(value);
+return try Forward(value);
+```
+
+On success, `try` evaluates to the function's ordinary declared return value.
+On failure, it re-raises the original BEAM exception with its reason and stack
+unchanged, allowing `terra run` to retain the originating Terra source frame.
+Constructors and non-call expressions reject `try`. Bare calls remain valid in
+Terra v0 for compatibility; `try` documents and preserves explicit propagation.
+
 Member access chains use dots. Map `.count` and `.members` have the concrete
 types described above; ordinary key access currently infers to `Var`:
 
@@ -412,6 +431,7 @@ statement       = var_decl
                 | multi_binding
                 | return_stmt
                 | call_stmt
+                | try_call_stmt
                 | once_call_stmt
                 | if_stmt
                 | unless_stmt
@@ -430,6 +450,7 @@ modifier        = "lazy" | "const" | "computed" | "atomic" | "thread_local" ;
 
 return_stmt     = "return", expr, { ",", expr }, ";" ;
 call_stmt       = call, ";" ;
+try_call_stmt   = "try", call, ";" ;
 once_call_stmt  = identifier, ";" ;
 
 if_stmt         = "if", expr, block, { "elseif", expr, block },
@@ -451,7 +472,7 @@ logical_and     = comparison, { "&&", comparison } ;
 comparison      = additive, [ comp_op, additive ] ;
 additive        = multiplicative, { add_op, multiplicative } ;
 multiplicative  = unary, { mul_op, unary } ;
-unary           = [ "!" | "-" ], unary | primary ;
+unary           = [ "!" | "-" | "try" ], unary | primary ;
 primary         = literal
                 | identifier
                 | call
@@ -474,6 +495,13 @@ mul_op          = "*" | "/" ;
 ```
 
 ## Current Limits
+
+Every rendered error and warning includes a stable lower-snake-case code in
+brackets, for example `[missing_return]` or `[unused_variable]`. Tooling should
+key behavior on that code rather than diagnostic prose, which may improve over
+time. Erlang callers can obtain the same atoms with `diagnostics:code/1` and
+`diagnostics:warning_code/1`. File extension and read failures use this same
+coded diagnostic path.
 
 Warnings are reported separately from errors and do not make checking, building,
 or execution fail. The warning analysis currently reports unused variables,

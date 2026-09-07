@@ -214,6 +214,13 @@ parse_unary([{bang, "!"} | Rest]) ->
         {ok, Value, Remaining} -> {ok, {unary, bang, Value}, Remaining};
         {error, Reason} -> {error, Reason}
     end;
+parse_unary([{keyword, 'try'} | Rest]) ->
+    case parse_unary(Rest) of
+        {ok, {call, Name, Args}, Remaining} when is_list(Name) ->
+            {ok, {try_call, Name, Args}, Remaining};
+        {ok, Value, _Remaining} -> {error, {try_requires_function_call, Value}};
+        {error, Reason} -> {error, Reason}
+    end;
 parse_unary(Tokens) ->
     parse_primary(Tokens).
 
@@ -618,6 +625,8 @@ infer_type({call, Name, Args}, Env)
     infer_numeric_conversion(Name, Args, Env);
 infer_type({call, restricted_map, Args}, Env) ->
     infer_restricted_map(Args, Env);
+infer_type({try_call, Name, Args}, Env) ->
+    infer_type({call, Name, Args}, Env);
 infer_type({call, Name, Args}, Env) ->
     case infer_type_list(Args, Env) of
         ok -> {ok, {call, Name}};
