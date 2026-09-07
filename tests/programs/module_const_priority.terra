@@ -1,0 +1,5 @@
+const Int Args = 9;
+
+function Number Main(String Args) {
+    return Args;
+}

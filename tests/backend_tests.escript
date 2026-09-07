@@ -15,6 +15,7 @@ main(_Args) ->
                test_once_reentrancy(OutDir),
                test_storage_semantics(OutDir), test_computed_deferred(OutDir),
                test_restricted_map(OutDir),
+               test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_source_map(OutDir),
                test_showcase_compile(OutDir)],
     case lists:member(fail, Results) of
@@ -335,6 +336,32 @@ test_restricted_map(OutDir) ->
         Other ->
             io:format("not ok - restricted and ordinary map properties~n  got: ~p~n",
                       [Other]),
+            fail
+    end.
+
+test_module_declarations(OutDir) ->
+    Path = "tests/programs/module_declarations.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_module_declarations, Source},
+         {ok, terra_module_declarations, 7, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("module-scope global and const declarations",
+                   contains(Binary, <<"Terra_base_">>) andalso
+                   contains(Binary, <<"terra_global(\"shared\"">>));
+        Other ->
+            io:format("not ok - module-scope global and const declarations~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_module_const_priority(OutDir) ->
+    Path = "tests/programs/module_const_priority.terra",
+    case transpiler:run_file(Path, "ignored args", OutDir) of
+        {ok, terra_module_const_priority, 9, _BeamPath, _ErlangPath} ->
+            expect("module consts have priority over function bindings", true);
+        Other ->
+            io:format("not ok - module consts have priority over function bindings~n"
+                      "  got: ~p~n", [Other]),
             fail
     end.
 

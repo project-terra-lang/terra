@@ -61,6 +61,13 @@ format({global_initializer_not_closed, Name}) ->
     {global_initializer_not_closed,
      io_lib:format("Global ~s depends on a lexical variable.", [Name]),
      "Use a closed initializer that does not reference parameters or local bindings."};
+format({variable_requires_scope, Scope}) ->
+    {variable_requires_scope,
+     io_lib:format("The ~s declaration must be inside a function body.",
+                   [name(Scope)]),
+     "Only global and const declarations may be written at module scope."};
+format({variable_requires_scope, Scope, _Tokens}) ->
+    format({variable_requires_scope, Scope});
 format({duplicate_case, Pattern}) ->
     {duplicate_case,
      io_lib:format("Switch case ~s is already handled.", [pattern_name(Pattern)]),
@@ -187,6 +194,10 @@ format({expected_variable_declaration, _Tokens}) ->
     {expected_variable_declaration,
      "This variable declaration is not valid Terra syntax.",
      "Use scope, optional modifier, type, name, initializer, and a semicolon."};
+format({expected_module_declaration, _Tokens}) ->
+    {expected_module_declaration,
+     "This module-scope declaration is not valid Terra syntax.",
+     "Write global Type name = value; or const Type name = value; before functions."};
 format({unsupported_statement, _Tokens}) ->
     {unsupported_statement,
      "This statement is not valid Terra syntax yet.",

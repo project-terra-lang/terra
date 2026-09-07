@@ -38,11 +38,11 @@ main(_Args) ->
                                        [number, string], [string, number]}}}
               end},
              {"top level code", "tests/programs/top_level_code.terra",
-              fun(Result) ->
+             fun(Result) ->
                   case Result of
-                      {error, {with_span, {expected_function_declaration, _Tokens}, Span}} ->
+                      {error, {with_span, {variable_requires_scope, local, _Tokens}, Span}} ->
                           maps:get(start, Span) == #{line => 1, column => 1, offset => 0};
-                      {error, {expected_function_declaration, _Tokens}} -> true;
+                      {error, {variable_requires_scope, local, _Tokens}} -> true;
                       _ -> false
                   end
               end},
@@ -105,9 +105,15 @@ main(_Args) ->
              {"try requires function call", "tests/programs/try_invalid.terra",
               fun expect_invalid_try/1},
              {"pipe propagation chain", "tests/programs/pipe_success.terra",
-              fun expect_pipe_propagation/1},
+             fun expect_pipe_propagation/1},
              {"pipe requires function call", "tests/programs/pipe_invalid.terra",
               fun expect_invalid_pipe/1},
+             {"module-scope global and const declarations",
+              "tests/programs/module_declarations.terra",
+              fun expect_module_declarations/1},
+             {"top-level local requires function scope",
+              "tests/programs/top_level_local.terra",
+              fun expect_top_level_local/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -204,6 +210,29 @@ expect_invalid_pipe({error, {in_function, "Main",
                              {with_span, {pipe_requires_function_call, _Tokens}, Span}}}) ->
     maps:get(line, maps:get(start, Span)) == 2;
 expect_invalid_pipe(_) -> false.
+
+expect_module_declarations({ok, Program}) ->
+    Declarations = maps:get(module_declarations, Program),
+    Main = find_function("Main", maps:get(functions, Program)),
+    [Base, Inferred, Shared] = Declarations,
+    maps:get(scope, Base) == const andalso
+    maps:get(eval, Base) == const andalso
+    maps:get(value, Base) == {int, 2} andalso
+    maps:get(scope, Inferred) == const andalso
+    maps:get(type, Inferred) == int andalso
+    maps:get(value, Inferred) == {binary, plus, {var_ref, "base"}, {int, 1}} andalso
+    maps:get(scope, Shared) == global andalso
+    maps:get(value, Shared) == {binary, plus, {var_ref, "inferred"}, {int, 4}} andalso
+    maps:get(values, hd(maps:get(statements, Main))) == [{var_ref, "shared"}];
+expect_module_declarations(_) ->
+    false.
+
+expect_top_level_local({error, {variable_requires_scope, local}}) ->
+    true;
+expect_top_level_local({error, {with_span, {variable_requires_scope, local, _Tokens}, _Span}}) ->
+    true;
+expect_top_level_local(_) ->
+    false.
 
 find_function(Name, Functions) ->
     hd([Function || Function <- Functions, maps:get(name, Function) == Name]).

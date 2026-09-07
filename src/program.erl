@@ -50,8 +50,10 @@ run_passes([{Name, Pass} | Rest], Context) ->
     end.
 
 parsing_pass(#{legacy_tokens := Tokens} = Context) ->
-    case parse_functions(Tokens, []) of
-        {ok, Functions} -> {ok, Context#{functions => Functions}};
+    case parse_module_items(Tokens, [], []) of
+        {ok, ModuleDeclarations, Functions} ->
+            {ok, Context#{module_declaration_tokens => ModuleDeclarations,
+                          functions => Functions}};
         Error -> Error
     end.
 
@@ -67,30 +69,44 @@ name_resolution_pass(#{functions := Functions} = Context) ->
         Name -> {error, {duplicate_function, Name}}
     end.
 
-type_checking_pass(#{functions := Functions, signatures := Signatures,
+type_checking_pass(#{module_declaration_tokens := ModuleDeclarationTokens,
+                     functions := Functions, signatures := Signatures,
                      entry := Entry} = Context) ->
-    case parse_bodies(Functions, Signatures, []) of
+    case parse_module_declarations(ModuleDeclarationTokens, Signatures) of
+        {ok, ModuleDeclarations, ModuleEnv} ->
+            type_check_functions(Functions, Signatures, Entry, ModuleDeclarations,
+                                 ModuleEnv, Context);
+        Error -> Error
+    end.
+
+type_check_functions(Functions, Signatures, Entry, ModuleDeclarations, ModuleEnv, Context) ->
+    case parse_bodies(Functions, Signatures, ModuleEnv, []) of
         {ok, Parsed} ->
             ParsedFunctions = lists:reverse(Parsed),
-            case duplicate_global_name(ParsedFunctions) of
+            Program = #{kind => program, entry => Entry,
+                        module_declarations => ModuleDeclarations,
+                        functions => ParsedFunctions},
+            case duplicate_global_name(Program) of
                 none ->
-                    Program = #{kind => program, entry => Entry,
-                                functions => ParsedFunctions},
                     {ok, Context#{program => Program}};
                 Name -> {error, {duplicate_global, Name}}
             end;
         Error -> Error
     end.
 
-duplicate_global_name(Functions) ->
-    duplicate_name([#{name => Name} || Name <- global_names(Functions)], []).
+duplicate_global_name(Program) ->
+    duplicate_name([#{name => Name} || Name <- global_names(Program)], []).
 
-global_names(#{kind := variable, scope := global, name := Name} = Statement) ->
+global_names(#{kind := variable, scope := Scope, name := Name} = Statement)
+  when Scope == global; Scope == const ->
     [Name | lists:append([global_names(Value)
                          || Value <- maps:values(maps:remove(name, Statement))])];
-global_names(#{kind := multi_binding, scope := global, bindings := Bindings,
+global_names(#{kind := multi_binding, scope := Scope, bindings := Bindings,
                value := Value}) ->
-    [maps:get(name, Binding) || Binding <- Bindings] ++ global_names(Value);
+    case Scope == global orelse Scope == const of
+        true -> [maps:get(name, Binding) || Binding <- Bindings] ++ global_names(Value);
+        false -> global_names(Value)
+    end;
 global_names(Value) when is_map(Value) ->
     lists:append([global_names(Child) || Child <- maps:values(Value)]);
 global_names(Value) when is_list(Value) ->
@@ -151,19 +167,37 @@ find_function_name(Name, [{id, Name, _Span} | Rest]) -> {ok, Rest};
 find_function_name(_Name, [{lbrace, _Value, _Span} | _Rest]) -> not_found;
 find_function_name(Name, [_Token | Rest]) -> find_function_name(Name, Rest).
 
-parse_functions([], Acc) ->
-    {ok, lists:reverse(Acc)};
-parse_functions([{keyword, function} | Rest], Acc) ->
+parse_module_items([], Declarations, Functions) ->
+    {ok, lists:reverse(Declarations), lists:reverse(Functions)};
+parse_module_items([{keyword, function} | Rest], Declarations, Functions) ->
     case parse_return_types(Rest) of
         {ok, Types, [{id, Name}, {lparen, "("} | ParamTokens]} ->
-            parse_function(Name, Types, ParamTokens, Acc);
+            case parse_function(Name, Types, ParamTokens) of
+                {ok, Function, Remaining} ->
+                    parse_module_items(Remaining, Declarations, [Function | Functions]);
+                Error -> Error
+            end;
         {ok, _Types, Other} -> {error, {expected_function_name, Other}};
         Error -> Error
     end;
-parse_functions(Other, _Acc) ->
+parse_module_items([{keyword, global} | _] = Tokens, Declarations, Functions) ->
+    parse_module_declaration_tokens(Tokens, Declarations, Functions);
+parse_module_items([{keyword, const} | _] = Tokens, Declarations, Functions) ->
+    parse_module_declaration_tokens(Tokens, Declarations, Functions);
+parse_module_items([{keyword, Scope} | _] = Tokens, _Declarations, _Functions)
+  when Scope == local; Scope == temp ->
+    {error, {variable_requires_scope, Scope, Tokens}};
+parse_module_items(Other, _Declarations, _Functions) ->
     {error, {expected_function_declaration, Other}}.
 
-parse_function(Name, Types, Tokens, Acc) ->
+parse_module_declaration_tokens(Tokens, Declarations, Functions) ->
+    case take_statement(Tokens, 0, []) of
+        {ok, Declaration, Rest} ->
+            parse_module_items(Rest, [Declaration | Declarations], Functions);
+        Error -> Error
+    end.
+
+parse_function(Name, Types, Tokens) ->
     case parse_parameters(Tokens, []) of
         {ok, Params, [{lbrace, "{"} | BodyTokens]} ->
             case duplicate_param_name(Params) of
@@ -173,7 +207,7 @@ parse_function(Name, Types, Tokens, Acc) ->
                             Function = #{kind => function, name => Name, params => Params,
                                          return_type => return_type(Types),
                                          return_types => Types, body => Body},
-                            parse_functions(Rest, [Function | Acc]);
+                            {ok, Function, Rest};
                         Error -> Error
                     end;
                 Duplicate ->
@@ -396,15 +430,99 @@ statement_definitely_returns(_Statement) ->
 all_statement_groups_return(Groups) ->
     Groups =/= [] andalso lists:all(fun statements_definitely_return/1, Groups).
 
-parse_bodies([], _Signatures, Acc) -> {ok, Acc};
-parse_bodies([F | Rest], Signatures, Acc) ->
+parse_module_declarations(DeclarationTokens, Signatures) ->
+    {ConstTokens, GlobalTokens} = partition_module_declarations(DeclarationTokens, [], []),
+    parse_module_declarations(ConstTokens ++ GlobalTokens, Signatures, env_from_bindings([]), []).
+
+partition_module_declarations([], Const, Global) ->
+    {lists:reverse(Const), lists:reverse(Global)};
+partition_module_declarations([[{keyword, const} | _] = Tokens | Rest], Const, Global) ->
+    partition_module_declarations(Rest, [Tokens | Const], Global);
+partition_module_declarations([Tokens | Rest], Const, Global) ->
+    partition_module_declarations(Rest, Const, [Tokens | Global]).
+
+parse_module_declarations([], _Signatures, Env, Acc) ->
+    {ok, lists:reverse(Acc), Env};
+parse_module_declarations([Tokens | Rest], Signatures, Env, Acc) ->
+    case parse_module_declaration(Tokens, Signatures, Env) of
+        {ok, Declaration, NewEnv} ->
+            parse_module_declarations(Rest, Signatures, NewEnv, [Declaration | Acc]);
+        Error -> Error
+    end.
+
+parse_module_declaration([{keyword, const}, {keyword, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Signatures, Env) ->
+    parse_declaration_value(const, const, Type, Name, ValueTokens, Signatures, Env);
+parse_module_declaration([{keyword, const}, {id, Name}, {equals, "="} | ValueTokens],
+                         Signatures, Env) ->
+    parse_declaration_value(const, const, var, Name, ValueTokens, Signatures, Env);
+parse_module_declaration([{keyword, global}, {keyword, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Signatures, Env) ->
+    parse_module_global_value(runtime, Type, Name, ValueTokens, Signatures, Env);
+parse_module_declaration([{keyword, global}, {keyword, Modifier}, {keyword, Type},
+                          {id, Name}, {equals, "="} | ValueTokens],
+                         Signatures, Env)
+  when Modifier == const; Modifier == atomic ->
+    parse_module_global_value(Modifier, Type, Name, ValueTokens, Signatures, Env);
+parse_module_declaration([{keyword, global}, {keyword, Modifier}, {keyword, _Type},
+                          {id, _Name}, {equals, "="} | _ValueTokens],
+                         _Signatures, _Env)
+  when Modifier == lazy; Modifier == computed; Modifier == thread_local ->
+    {error, {invalid_storage_combination, global, Modifier}};
+parse_module_declaration([{keyword, Scope} | _] = Tokens, _Signatures, _Env)
+  when Scope == local; Scope == temp ->
+    {error, {variable_requires_scope, Scope, Tokens}};
+parse_module_declaration(Tokens, _Signatures, _Env) ->
+    {error, {expected_module_declaration, Tokens}}.
+
+parse_module_global_value(Modifier, DeclaredType, Name, ValueTokens, Signatures, Env) ->
+    case parse_expr(ValueTokens, Signatures, Env) of
+        {ok, Value, [{endofline, ";"}]} ->
+            case single_type(Value, Signatures, Env) of
+                {ok, ActualType} ->
+                    Type = case DeclaredType of
+                               var -> ActualType;
+                               _ -> DeclaredType
+                           end,
+                    case type_accepts(Type, ActualType) of
+                        true ->
+                            case validate_module_global_storage(Modifier, Type) of
+                                ok ->
+                                    {ok, #{kind => variable, scope => global,
+                                           eval => Modifier, type => Type, name => Name,
+                                           value => Value,
+                                           concurrency => concurrency(Modifier)},
+                                     env_put(Name, Type, Env)};
+                                Error -> Error
+                            end;
+                        false ->
+                            {error, {type_mismatch, Type, Value}}
+                    end;
+                Error -> Error
+            end;
+        {ok, _Value, Other} -> {error, {expected_endofline, Other}};
+        Error -> Error
+    end.
+
+validate_module_global_storage(atomic, Type) ->
+    validate_atomic_type(Type);
+validate_module_global_storage(_Modifier, _Type) ->
+    ok.
+
+parse_bodies([], _Signatures, _ModuleEnv, Acc) -> {ok, Acc};
+parse_bodies([F | Rest], Signatures, ModuleEnv, Acc) ->
     Env = env_from_bindings([{maps:get(name, P), maps:get(type, P)}
-                             || P <- maps:get(params, F)]),
+                             || P <- maps:get(params, F)] ++ env_bindings(ModuleEnv)),
     case parse_statements(maps:get(body, F), F, Signatures, Env, []) of
         {ok, Statements, _} ->
-            parse_bodies(Rest, Signatures, [F#{statements => Statements} | Acc]);
+            parse_bodies(Rest, Signatures, ModuleEnv, [F#{statements => Statements} | Acc]);
         {error, Reason} -> {error, {in_function, maps:get(name, F), Reason}}
     end.
+
+env_bindings([Scope | _]) ->
+    maps:to_list(Scope);
+env_bindings([]) ->
+    [].
 
 parse_statements([], _F, _Sigs, Env, Acc) ->
     {ok, lists:reverse(Acc), Env};
@@ -897,6 +1015,8 @@ validate_storage_declaration(global, atomic, Type, Name, Value) ->
     end;
 validate_storage_declaration(global, _Modifier, _Type, Name, Value) ->
     validate_closed_global(Name, Value);
+validate_storage_declaration(const, const, _Type, _Name, _Value) ->
+    ok;
 validate_storage_declaration(_Scope, atomic, Type, _Name, _Value) ->
     validate_atomic_type(Type);
 validate_storage_declaration(_Scope, _Modifier, _Type, _Name, _Value) ->

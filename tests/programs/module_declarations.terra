@@ -1,0 +1,7 @@
+const Int base = 2;
+const inferred = base + 1;
+global Int shared = inferred + 4;
+
+function Number Main(String Args) {
+    return shared;
+}

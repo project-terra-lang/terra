@@ -77,13 +77,15 @@ codegen_pass(#{module := Module, program := Program} = Context) ->
 
 generate_module(Module, #{functions := Functions} = Program) ->
     SourcePath = maps:get(source_path, Program, "terra_source"),
+    ModuleDeclarations = maps:get(module_declarations, Program, []),
     MainLine = function_source_line("Main", Functions),
     ["-module(", atom_to_list(Module), ").\n",
      "-export([main/1]).\n\n",
      source_attribute(SourcePath, MainLine),
      "main(Args) ->\n",
      "    terra_fn_main(terra_args(Args)).\n\n",
-     [generate_function(Function, SourcePath) || Function <- Functions],
+     [generate_function(Function#{module_declarations => ModuleDeclarations}, SourcePath)
+      || Function <- Functions],
      "-file(\"terra_runtime\", 1).\n",
      runtime_helpers()].
 
@@ -104,10 +106,14 @@ generate_regular_function(Function, SourcePath) ->
     Name = maps:get(name, Function),
     Params = maps:get(params, Function),
     {ParamNames, Env, Counter} = bind_parameters(Params, 1, [], #{}),
+    {ModulePrelude, ModuleEnv, ModuleCounter} =
+        generate_statements(maps:get(module_declarations, Function, []),
+                            Env, Counter, 2, Name),
     {Body, _FinalEnv, _FinalCounter} =
-        generate_statements(maps:get(statements, Function, []), Env, Counter, 2, Name),
+        generate_statements(maps:get(statements, Function, []),
+                            ModuleEnv, ModuleCounter, 2, Name),
     Default = default_value(maps:get(return_types, Function)),
-    Expressions = Body ++ [[indent(2), Default]],
+    Expressions = ModulePrelude ++ Body ++ [[indent(2), Default]],
     [source_attribute(SourcePath, maps:get(source_line, Function, 1)),
      function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",
      indent(1), "try\n",
@@ -120,13 +126,17 @@ generate_tail_function(Function, TailCalls, SourcePath) ->
     Name = maps:get(name, Function),
     Params = maps:get(params, Function),
     {ParamNames, Env, Counter} = bind_parameters(Params, 1, [], #{}),
+    {ModulePrelude, ModuleEnv, ModuleCounter} =
+        generate_statements(maps:get(module_declarations, Function, []),
+                            Env, Counter, 2, Name),
     StepName = tail_step_name(Name),
     Dispatch = [tail_dispatch_clause(Target, Arity) || {Target, Arity} <- TailCalls] ++
                [["{terra_return, TerraReturnValue} -> TerraReturnValue"]],
     {Body, _FinalEnv, _FinalCounter} =
-        generate_statements(maps:get(statements, Function, []), Env, Counter, 2, Name),
+        generate_statements(maps:get(statements, Function, []),
+                            ModuleEnv, ModuleCounter, 2, Name),
     Default = default_value(maps:get(return_types, Function)),
-    Expressions = Body ++ [[indent(2), Default]],
+    Expressions = ModulePrelude ++ Body ++ [[indent(2), Default]],
     SourceLine = maps:get(source_line, Function, 1),
     [source_attribute(SourcePath, SourceLine),
      function_name(Name), "(", lists:join(", ", ParamNames), ") ->\n",

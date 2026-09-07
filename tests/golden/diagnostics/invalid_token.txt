@@ -1,0 +1,10 @@
+-- INVALID TOKEN [invalid_token] ----- tests/programs/invalid_token.terra:2:3
+
+  1 | function Number Main(String Args) {
+> 2 |   @
+   |   ^
+  3 | }
+
+I found the unexpected character '@'.
+
+Hint: Remove it or replace it with valid Terra punctuation.

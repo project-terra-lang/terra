@@ -1,0 +1,9 @@
+-- VARIABLE REQUIRES SCOPE [variable_requires_scope] --- tests/programs/top_level_local.terra:1:1
+
+> 1 | local Int value = 1;
+   | ^
+  2 | 
+
+The local declaration must be inside a function body.
+
+Hint: Only global and const declarations may be written at module scope.

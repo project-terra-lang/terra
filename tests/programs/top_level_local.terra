@@ -1,0 +1,5 @@
+local Int value = 1;
+
+function Number Main(String Args) {
+    return 0;
+}

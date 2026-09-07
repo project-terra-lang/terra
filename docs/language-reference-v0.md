@@ -6,7 +6,9 @@ VM. The language should stay simple and grow incrementally.
 
 ## Program Shape
 
-A Terra source file contains function declarations only. Every valid program
+A Terra source file contains optional module-scope `global` and `const`
+declarations followed by function declarations. `local`, `temp`, and ordinary
+statements are only valid inside a function or block scope. Every valid program
 must declare exactly one entry point:
 
 ```terra
@@ -156,13 +158,20 @@ discarded when that BEAM process exits.
 Variable declarations are immutable. Direct reassignment is rejected.
 
 ```terra
-local Int count = 10;
+const Int max_players = 128;
 global State state = State();
+local Int count = 10;
 temp String label = "debug";
 ```
 
-Supported declaration scopes are `global`, `local`, and `temp`. Supported
-declaration modifiers are:
+At module scope, only `global` and `const` declarations are valid. Module
+`const` declarations are compile-time constants and are resolved before module
+globals and ordinary function bindings. Module `global` declarations may refer
+to module constants and earlier module bindings, but not to function parameters
+or local variables.
+
+Inside function bodies, supported declaration scopes are `global`, `local`, and
+`temp`. Supported declaration modifiers are:
 
 ```text
 lazy const computed atomic thread_local
@@ -431,7 +440,8 @@ This sketch is intentionally small and tracks the current parser. It is not yet
 a formal parser generator grammar.
 
 ```ebnf
-program         = { function_decl } ;
+program         = { module_decl }, { function_decl } ;
+module_decl     = global_decl | const_decl ;
 function_decl   = "function", return_types, identifier, "(", [ params ], ")",
                   block ;
 return_types    = type | "(", type, { ",", type }, ")" ;
@@ -454,6 +464,9 @@ statement       = var_decl
                 | while_stmt
                 | do_while_stmt ;
 
+global_decl     = "global", [ "const" | "atomic" ], type, identifier, "=",
+                  expr, ";" ;
+const_decl      = "const", [ type ], identifier, "=", expr, ";" ;
 var_decl        = scope, [ modifier ], type, identifier, "=", expr, ";" ;
 destructure_decl = scope, "(", binding, { ",", binding }, ")", "=", expr, ";" ;
 multi_binding   = scope, binding, ",", binding, { ",", binding }, "=", expr, ";" ;

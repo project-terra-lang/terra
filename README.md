@@ -39,8 +39,11 @@ overflow. Mixed numeric arithmetic promotes to `Float`, then `SInt`, then
 1. Variables
 - All Variables are Immutable
 ```lua
--- global variables
+-- module-scope global variables
 global State state = State();
+
+-- module-scope compile-time constants
+const Int max_players = 128;
 
 -- local variables
 local Int x = 10;
@@ -49,10 +52,14 @@ local Int x = 10;
 temp Var zss = Var();
 ```
 
-`global` values are initialized successfully once and shared by all BEAM
-processes running the generated module. `thread_local` values initialize once
-per BEAM process. `atomic` stores `Int` or `SInt` values in a BEAM atomic cell,
-and `computed` reevaluates its expression whenever the binding is read.
+`global` values may be written at module scope, outside any function body. They
+are initialized successfully once and shared by all BEAM processes running the
+generated module. `const` values may also be written at module scope; because
+they are compile-time constants, they are resolved before globals and ordinary
+function bindings. All other variable declarations must be written inside a
+function or block scope. `thread_local` values initialize once per BEAM
+process. `atomic` stores `Int` or `SInt` values in a BEAM atomic cell, and
+`computed` reevaluates its expression whenever the binding is read.
 
 `RestrictedMap(capacity, map)` creates an immutable map whose initial member
 count cannot exceed its non-negative integer capacity; `RestrictedMap(capacity)`
