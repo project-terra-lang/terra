@@ -1,0 +1,40 @@
+temp region(1024);
+
+struct Socket {
+    SockAddr address;
+
+    enum SockAddr {
+        Addr(*String host);
+        PORT(Int value);
+        Newt;
+    }
+}
+
+struct Web {
+    String server_name;
+    Number port;
+    *Socket sock;
+}
+
+function Socket MakeSocket(*String host) {
+    return Socket(SockAddr.Addr(host));
+}
+
+function Number Main(String Args) {
+    local *String args = Args;
+    local Socket socket = MakeSocket(args);
+    local *Socket sock = socket;
+    local Web web = Web("terra.local", 8080, sock);
+
+    if web.sock.*.address == {
+        case SockAddr.Addr(bind host):
+            stdout(web.server_name, host);
+            return web.port;
+        case SockAddr.PORT(bind value):
+            return value;
+        case SockAddr.Newt():
+            return 0;
+        case:
+            return 0;
+    }
+}

@@ -167,7 +167,23 @@ local Player player = Player("Ada", 10);
 stdout(player.name);
 ```
 
-Enum payload constructors are declared explicitly with `variant`. They are not
+Struct and enum bodies may contain small inline `struct` or `enum`
+declarations. Inline user types are registered by their declared name and can be
+used by later fields, functions, constructors, and enum matches:
+
+```terra
+struct Socket {
+    SockAddr address;
+
+    enum SockAddr {
+        Addr(String host);
+        Closed;
+    }
+}
+```
+
+Enum payload constructors are declared in the enum body, either with the
+explicit `variant` keyword or the shorter bare variant form. They are not
 created magically by the compiler:
 
 ```terra

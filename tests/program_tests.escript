@@ -112,11 +112,13 @@ main(_Args) ->
               "tests/programs/record_pipeline_invalid.terra",
               fun expect_record_pipeline_invalid/1},
              {"tagged enums", "tests/programs/enums.terra", fun expect_enums/1},
+             {"inline user types", "tests/programs/inline_user_types.terra",
+              fun expect_inline_user_types/1},
              {"enum variant payload types", "tests/programs/enum_bad_variant.terra",
               fun expect_enum_bad_variant/1},
              {"unknown enum variant", "tests/programs/enum_unknown_variant.terra",
               fun expect_enum_unknown_variant/1},
-             {"enum variants require explicit declarations",
+             {"bare enum variants",
               "tests/programs/enum_implicit_variant.terra",
               fun expect_enum_implicit_variant/1},
              {"enum pattern arity", "tests/programs/enum_pattern_arity.terra",
@@ -253,6 +255,16 @@ expect_enums({ok, Program}) ->
     maps:get(return_types, Load) == [{named, "Result"}];
 expect_enums(_) -> false.
 
+expect_inline_user_types({ok, Program}) ->
+    [Wrapper, Inner] = maps:get(records, Program),
+    [Status] = maps:get(enums, Program),
+    [Ready, Down] = maps:get(variants, Status),
+    maps:get(fields, Wrapper) == [#{type => {named, "Inner"}, name => "inner"}] andalso
+    maps:get(fields, Inner) == [#{type => {named, "Status"}, name => "status"}] andalso
+    maps:get(fields, Ready) == [] andalso
+    maps:get(fields, Down) == [#{type => string, name => "reason"}];
+expect_inline_user_types(_) -> false.
+
 expect_enum_bad_variant(
   {error, {in_function, "Main",
            {variant_type_mismatch, "Result", "Ok", [int], [string]}}}) -> true;
@@ -263,9 +275,10 @@ expect_enum_unknown_variant(
            {unknown_enum_variant, "Status", "Missing"}}}) -> true;
 expect_enum_unknown_variant(_) -> false.
 
-expect_enum_implicit_variant({error, {expected_enum_variant, _Tokens}}) -> true;
-expect_enum_implicit_variant(
-  {error, {with_span, {expected_enum_variant, _Tokens}, _Span}}) -> true;
+expect_enum_implicit_variant({ok, Program}) ->
+    [Result] = maps:get(enums, Program),
+    [Ok] = maps:get(variants, Result),
+    maps:get(fields, Ok) == [#{type => int, name => "value"}];
 expect_enum_implicit_variant(_) -> false.
 
 expect_enum_pattern_arity(

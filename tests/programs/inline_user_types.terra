@@ -1,0 +1,27 @@
+struct Wrapper {
+    Inner inner;
+
+    enum Status {
+        Ready;
+        Down(String reason);
+    }
+
+    struct Inner {
+        Status status;
+    }
+}
+
+function Number Main(String Args) {
+    local Inner inner = Inner(Status.Down(Args));
+    local Wrapper wrapper = Wrapper(inner);
+
+    if wrapper.inner.status == {
+        case Status.Ready():
+            return 1;
+        case Status.Down(bind reason):
+            stdout(reason);
+            return 2;
+        case:
+            return 0;
+    }
+}

@@ -198,18 +198,22 @@ parse_module_items([], Declarations, Records, Enums, Functions) ->
      lists:reverse(Enums), lists:reverse(Functions)};
 parse_module_items([{keyword, struct}, {id, Name}, {lbrace, "{"} | Rest],
                    Declarations, Records, Enums, Functions) ->
-    case parse_record_fields(Rest, []) of
-        {ok, Fields, Remaining} ->
+    case parse_record_body(Rest, [], [], []) of
+        {ok, Fields, NestedRecords, NestedEnums, Remaining} ->
             Record = #{kind => struct, name => Name, fields => Fields},
-            parse_module_items(Remaining, Declarations, [Record | Records], Enums, Functions);
+            parse_module_items(Remaining, Declarations,
+                               add_user_types([Record | NestedRecords], Records),
+                               add_user_types(NestedEnums, Enums), Functions);
         Error -> Error
     end;
 parse_module_items([{keyword, enum}, {id, Name}, {lbrace, "{"} | Rest],
                    Declarations, Records, Enums, Functions) ->
-    case parse_enum_variants(Rest, []) of
-        {ok, Variants, Remaining} ->
+    case parse_enum_body(Rest, [], [], []) of
+        {ok, Variants, NestedRecords, NestedEnums, Remaining} ->
             Enum = #{kind => enum, name => Name, variants => Variants},
-            parse_module_items(Remaining, Declarations, Records, [Enum | Enums], Functions);
+            parse_module_items(Remaining, Declarations,
+                               add_user_types(NestedRecords, Records),
+                               add_user_types([Enum | NestedEnums], Enums), Functions);
         Error -> Error
     end;
 parse_module_items([{keyword, function} | Rest], Declarations, Records, Enums, Functions) ->
@@ -235,6 +239,9 @@ parse_module_items([{keyword, Scope} | _] = Tokens,
 parse_module_items(Other, _Declarations, _Records, _Enums, _Functions) ->
     {error, {expected_function_declaration, Other}}.
 
+add_user_types(Types, Acc) ->
+    lists:reverse(Types) ++ Acc.
+
 parse_module_declaration_tokens(Tokens, Declarations, Records, Enums, Functions) ->
     case take_statement(Tokens, 0, []) of
         {ok, Declaration, Rest} ->
@@ -242,55 +249,112 @@ parse_module_declaration_tokens(Tokens, Declarations, Records, Enums, Functions)
         Error -> Error
     end.
 
-parse_record_fields([{rbrace, "}"} | Rest], Acc) ->
-    Fields = lists:reverse(Acc),
+parse_record_body([{rbrace, "}"} | Rest], FieldAcc, RecordAcc, EnumAcc) ->
+    Fields = lists:reverse(FieldAcc),
     case duplicate_name(Fields, []) of
-        none -> {ok, Fields, Rest};
+        none -> {ok, Fields, lists:reverse(RecordAcc), lists:reverse(EnumAcc), Rest};
         Name -> {error, {duplicate_record_field, Name}}
     end;
-parse_record_fields([{keyword, Type}, {id, Name}, {endofline, ";"} | Rest], Acc) ->
+parse_record_body([{keyword, struct}, {id, Name}, {lbrace, "{"} | Rest],
+                  FieldAcc, RecordAcc, EnumAcc) ->
+    case parse_record_body(Rest, [], [], []) of
+        {ok, Fields, NestedRecords, NestedEnums, Remaining} ->
+            Record = #{kind => struct, name => Name, fields => Fields},
+            parse_record_body(Remaining, FieldAcc,
+                              add_user_types([Record | NestedRecords], RecordAcc),
+                              add_user_types(NestedEnums, EnumAcc));
+        Error -> Error
+    end;
+parse_record_body([{keyword, enum}, {id, Name}, {lbrace, "{"} | Rest],
+                  FieldAcc, RecordAcc, EnumAcc) ->
+    case parse_enum_body(Rest, [], [], []) of
+        {ok, Variants, NestedRecords, NestedEnums, Remaining} ->
+            Enum = #{kind => enum, name => Name, variants => Variants},
+            parse_record_body(Remaining, FieldAcc,
+                              add_user_types(NestedRecords, RecordAcc),
+                              add_user_types([Enum | NestedEnums], EnumAcc));
+        Error -> Error
+    end;
+parse_record_body([{keyword, Type}, {id, Name}, {endofline, ";"} | Rest],
+                  FieldAcc, RecordAcc, EnumAcc) ->
     case is_type(Type) of
-        true -> parse_record_fields(Rest, [#{type => Type, name => Name} | Acc]);
+        true -> parse_record_body(Rest, [#{type => Type, name => Name} | FieldAcc],
+                                  RecordAcc, EnumAcc);
         false -> {error, {unknown_record_field_type, Type}}
     end;
-parse_record_fields([{id, Type}, {id, Name}, {endofline, ";"} | Rest], Acc) ->
-    parse_record_fields(Rest, [#{type => {named, Type}, name => Name} | Acc]);
-parse_record_fields([{times, "*"}, {keyword, Type}, {id, Name},
-                     {endofline, ";"} | Rest], Acc) ->
+parse_record_body([{id, Type}, {id, Name}, {endofline, ";"} | Rest],
+                  FieldAcc, RecordAcc, EnumAcc) ->
+    parse_record_body(Rest, [#{type => {named, Type}, name => Name} | FieldAcc],
+                      RecordAcc, EnumAcc);
+parse_record_body([{times, "*"}, {keyword, Type}, {id, Name},
+                   {endofline, ";"} | Rest], FieldAcc, RecordAcc, EnumAcc) ->
     case is_type(Type) of
-        true -> parse_record_fields(Rest, [#{type => {pointer, Type}, name => Name} | Acc]);
+        true -> parse_record_body(Rest, [#{type => {pointer, Type}, name => Name} | FieldAcc],
+                                  RecordAcc, EnumAcc);
         false -> {error, {unknown_record_field_type, Type}}
     end;
-parse_record_fields([{times, "*"}, {id, Type}, {id, Name},
-                     {endofline, ";"} | Rest], Acc) ->
-    parse_record_fields(Rest, [#{type => {pointer, {named, Type}}, name => Name} | Acc]);
-parse_record_fields([], _Acc) ->
+parse_record_body([{times, "*"}, {id, Type}, {id, Name},
+                   {endofline, ";"} | Rest], FieldAcc, RecordAcc, EnumAcc) ->
+    parse_record_body(Rest, [#{type => {pointer, {named, Type}}, name => Name} | FieldAcc],
+                      RecordAcc, EnumAcc);
+parse_record_body([], _FieldAcc, _RecordAcc, _EnumAcc) ->
     {error, unterminated_record_body};
-parse_record_fields(Other, _Acc) ->
+parse_record_body(Other, _FieldAcc, _RecordAcc, _EnumAcc) ->
     {error, {expected_record_field, Other}}.
 
-parse_enum_variants([{rbrace, "}"} | Rest], Acc) ->
-    Variants = lists:reverse(Acc),
+parse_enum_body([{rbrace, "}"} | Rest], VariantAcc, RecordAcc, EnumAcc) ->
+    Variants = lists:reverse(VariantAcc),
     case duplicate_name(Variants, []) of
-        none -> {ok, Variants, Rest};
+        none -> {ok, Variants, lists:reverse(RecordAcc), lists:reverse(EnumAcc), Rest};
         Name -> {error, {duplicate_enum_variant, Name}}
     end;
-parse_enum_variants([{keyword, variant}, {id, Name}, {endofline, ";"} | Rest], Acc) ->
-    parse_enum_variants(Rest, [#{name => Name, fields => []} | Acc]);
-parse_enum_variants([{keyword, variant}, {id, Name}, {lparen, "("} | Rest], Acc) ->
+parse_enum_body([{keyword, struct}, {id, Name}, {lbrace, "{"} | Rest],
+                VariantAcc, RecordAcc, EnumAcc) ->
+    case parse_record_body(Rest, [], [], []) of
+        {ok, Fields, NestedRecords, NestedEnums, Remaining} ->
+            Record = #{kind => struct, name => Name, fields => Fields},
+            parse_enum_body(Remaining, VariantAcc,
+                            add_user_types([Record | NestedRecords], RecordAcc),
+                            add_user_types(NestedEnums, EnumAcc));
+        Error -> Error
+    end;
+parse_enum_body([{keyword, enum}, {id, Name}, {lbrace, "{"} | Rest],
+                VariantAcc, RecordAcc, EnumAcc) ->
+    case parse_enum_body(Rest, [], [], []) of
+        {ok, Variants, NestedRecords, NestedEnums, Remaining} ->
+            Enum = #{kind => enum, name => Name, variants => Variants},
+            parse_enum_body(Remaining, VariantAcc,
+                            add_user_types(NestedRecords, RecordAcc),
+                            add_user_types([Enum | NestedEnums], EnumAcc));
+        Error -> Error
+    end;
+parse_enum_body([{keyword, variant} | Rest], VariantAcc, RecordAcc, EnumAcc) ->
+    parse_enum_variant(Rest, VariantAcc, RecordAcc, EnumAcc);
+parse_enum_body([{id, _Name} | _] = Tokens, VariantAcc, RecordAcc, EnumAcc) ->
+    parse_enum_variant(Tokens, VariantAcc, RecordAcc, EnumAcc);
+parse_enum_body([], _VariantAcc, _RecordAcc, _EnumAcc) ->
+    {error, unterminated_enum_body};
+parse_enum_body(Other, _VariantAcc, _RecordAcc, _EnumAcc) ->
+    {error, {expected_enum_variant, Other}}.
+
+parse_enum_variant([{id, Name}, {endofline, ";"} | Rest],
+                   VariantAcc, RecordAcc, EnumAcc) ->
+    parse_enum_body(Rest, [#{name => Name, fields => []} | VariantAcc],
+                    RecordAcc, EnumAcc);
+parse_enum_variant([{id, Name}, {lparen, "("} | Rest],
+                   VariantAcc, RecordAcc, EnumAcc) ->
     case parse_parameters(Rest, []) of
         {ok, Fields, [{endofline, ";"} | Remaining]} ->
             case duplicate_name(Fields, []) of
-                none -> parse_enum_variants(Remaining,
-                                            [#{name => Name, fields => Fields} | Acc]);
+                none -> parse_enum_body(Remaining,
+                                        [#{name => Name, fields => Fields} | VariantAcc],
+                                        RecordAcc, EnumAcc);
                 Field -> {error, {duplicate_variant_field, Name, Field}}
             end;
         {ok, _Fields, Other} -> {error, {expected_endofline, Other}};
         Error -> Error
     end;
-parse_enum_variants([], _Acc) ->
-    {error, unterminated_enum_body};
-parse_enum_variants(Other, _Acc) ->
+parse_enum_variant(Other, _VariantAcc, _RecordAcc, _EnumAcc) ->
     {error, {expected_enum_variant, Other}}.
 
 parse_function(Name, Types, Tokens) ->
