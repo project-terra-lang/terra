@@ -350,6 +350,11 @@ generate_statement(#{kind := call, name := stdout, args := Args},
     Values = [expression(Arg, Env) || Arg <- Args],
     {[indent(Level), "terra_stdout([", lists:join(", ", Values), "])"],
      Env, Counter};
+generate_statement(#{kind := ffi_call, module := ModuleName,
+                     function := FunctionName, args := Args},
+                   Env, Counter, Level, _FunctionName) ->
+    {[indent(Level), expression({ffi_call, ModuleName, FunctionName, Args}, Env)],
+     Env, Counter};
 generate_statement(#{kind := pointer_write, pointer := Pointer, value := Value},
                    Env, Counter, Level, _FunctionName) ->
     {[indent(Level), "terra_pointer_write(", expression(Pointer, Env), ", ",
@@ -621,6 +626,9 @@ expression({pipe_call, Left, Name, Args}, Env) ->
 expression({remote_call, ModuleName, FunctionName, Args}, Env) ->
     [remote_module_name(ModuleName), ":", function_name(FunctionName), "(",
      lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
+expression({ffi_call, ModuleName, FunctionName, Args}, Env) ->
+    [erlang_atom(ModuleName), ":", erlang_atom(FunctionName), "(",
+     lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
 expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
 
 update_entry({{field, Name}, Value}, Env) ->
@@ -672,6 +680,9 @@ function_call(Name, _Args, _Env) ->
 
 remote_module_name(Name) ->
     "terra_" ++ sanitize_lower(Name).
+
+erlang_atom(Name) ->
+    io_lib:format("~p", [list_to_atom(Name)]).
 
 return_expression([Value], Env) -> expression(Value, Env);
 return_expression(Values, Env) ->

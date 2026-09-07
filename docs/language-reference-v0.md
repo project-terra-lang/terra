@@ -7,9 +7,10 @@ VM. The language should stay simple and grow incrementally.
 ## Program Shape
 
 A Terra source file may begin with one optional `temp region(capacity);`
-configuration, followed by module-scope imports, exports, `global` and `const`
-declarations, user type declarations, and function declarations. Other `local`,
-`temp`, and ordinary statements are only valid inside a function or block scope.
+configuration, followed by module-scope imports, exports, Erlang external
+signatures, `global` and `const` declarations, user type declarations, and
+function declarations. Other `local`, `temp`, and ordinary statements are only
+valid inside a function or block scope.
 Every valid executable program must declare exactly one entry point:
 
 ```terra
@@ -47,6 +48,25 @@ function Int Add(Int left, Int right) {
 Only exported functions are visible through qualified calls such as
 `math_lib.Add(...)`. Structs, enums, globals, and constants remain local to the
 source file in this version.
+
+### Erlang FFI
+
+An Erlang call must be selected by an exact module-level `extern` signature:
+
+```terra
+extern Number erlang.lists.sum(List values);
+
+function Number Main(String Args) {
+  return erlang.lists.sum([1, 2, 3]);
+}
+```
+
+The declaration records the Erlang module, function, arity, Terra parameter
+types, and Terra return types. The compiler rejects calls to undeclared modules
+or undeclared functions and checks arguments against the selected signature.
+Code generation lowers the call directly to `module:function(...)`; it does not
+perform implicit value conversion or verify that the installed Erlang/OTP
+module implements the declared signature. Runtime failures propagate normally.
 
 The current compiler pipeline is split into explicit passes:
 
@@ -644,10 +664,12 @@ a formal parser generator grammar.
 ```ebnf
 program         = [ region_decl ], { module_item } ;
 region_decl     = "temp", "region", "(", integer, ")", ";" ;
-module_item     = import_decl | export_decl | struct_decl | enum_decl
+module_item     = import_decl | export_decl | extern_decl | struct_decl | enum_decl
                 | module_decl | function_decl ;
 import_decl     = "import", identifier, ";" ;
 export_decl     = "export", identifier, ";" ;
+extern_decl     = "extern", return_types, "erlang", ".", identifier, ".",
+                  identifier, "(", [ params ], ")", ";" ;
 module_decl     = global_decl | const_decl ;
 struct_decl     = "struct", identifier, "{", { field_decl }, "}" ;
 field_decl      = value_type, identifier, ";" ;
@@ -721,6 +743,7 @@ primary         = literal
                 | identifier
                 | call
                 | remote_call
+                | ffi_call
                 | variant
                 | member
                 | list
@@ -731,6 +754,8 @@ primary         = literal
 call            = identifier, "(", [ expr, { ",", expr } ], ")" ;
 remote_call     = identifier, ".", identifier, "(", [ expr, { ",", expr } ],
                   ")" ;
+ffi_call        = "erlang", ".", identifier, ".", identifier, "(",
+                  [ expr, { ",", expr } ], ")" ;
 variant         = identifier, ".", identifier, "(", [ expr, { ",", expr } ], ")" ;
 restricted_map  = "RestrictedMap", "(", expr, [ ",", expr ], ")" ;
 member          = identifier, ".", ( identifier | "*" ),

@@ -25,6 +25,7 @@ main(_Args) ->
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_imports_exports(OutDir),
+               test_erlang_ffi(OutDir),
                test_source_map(OutDir),
                test_showcase_run(OutDir), test_counter_example(OutDir)],
     case lists:member(fail, Results) of
@@ -525,6 +526,18 @@ test_imports_exports(OutDir) ->
                    filelib:is_file(LibBeam));
         Other ->
             io:format("not ok - module imports and exports~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_erlang_ffi(OutDir) ->
+    Path = "tests/programs/erlang_ffi.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_erlang_ffi, Source},
+         {ok, terra_erlang_ffi, 6, _BeamPath, _ErlangPath}} ->
+            expect("selected Erlang FFI call",
+                   contains(iolist_to_binary(Source), <<"lists:sum(">>));
+        Other ->
+            io:format("not ok - selected Erlang FFI call~n  got: ~p~n", [Other]),
             fail
     end.
 

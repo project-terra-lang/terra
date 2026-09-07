@@ -82,6 +82,26 @@ function Int Add(Int left, Int right) {
 Only exported functions are callable as `module.Function(...)`. Imported library
 files may omit `Main`; executable files still keep the fixed `Main` entry point.
 
+## Erlang FFI
+
+Terra can call a deliberately selected Erlang function after declaring its
+Terra-facing signature at module scope:
+
+```terra
+extern Number erlang.lists.sum(List values);
+
+function Number Main(String Args) {
+    local List values = [1, 2, 3];
+    return erlang.lists.sum(values);
+}
+```
+
+Each `extern` declaration selects exactly one Erlang module/function pair and
+defines the argument and return types Terra will check. Calls without a matching
+declaration are rejected. Values are passed without automatic conversion, so an
+external signature must describe the Erlang function accurately; broader BEAM
+term mappings are intentionally handled as a separate language step.
+
 ## Types
 
 Terra currently supports:

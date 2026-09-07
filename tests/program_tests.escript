@@ -171,6 +171,18 @@ main(_Args) ->
              {"unknown export",
               "tests/programs/export_unknown.terra",
               fun expect_export_unknown/1},
+             {"selected Erlang FFI call",
+              "tests/programs/erlang_ffi.terra",
+              fun expect_erlang_ffi/1},
+             {"undeclared Erlang FFI call",
+              "tests/programs/erlang_ffi_undeclared.terra",
+              fun expect_erlang_ffi_undeclared/1},
+             {"undeclared Erlang FFI module",
+              "tests/programs/erlang_ffi_unknown_module.terra",
+              fun expect_erlang_ffi_unknown_module/1},
+             {"duplicate Erlang FFI declaration",
+              "tests/programs/erlang_ffi_duplicate.terra",
+              fun expect_erlang_ffi_duplicate/1},
              {"top-level local requires function scope",
               "tests/programs/top_level_local.terra",
               fun expect_top_level_local/1},
@@ -412,6 +424,30 @@ expect_export_unknown({error, {unknown_export, "Missing"}}) ->
     true;
 expect_export_unknown(_) ->
     false.
+
+expect_erlang_ffi({ok, Program}) ->
+    [#{kind := erlang_ffi, module := "lists", function := "sum",
+       params := [#{type := list}], return_types := [number]}] = maps:get(externals, Program),
+    Main = find_function("Main", maps:get(functions, Program)),
+    [_Values, Call, Return] = maps:get(statements, Main),
+    maps:get(kind, Call) == ffi_call andalso
+    maps:get(values, Return) ==
+        [{ffi_call, "lists", "sum", [{var_ref, "values"}]}];
+expect_erlang_ffi(_) ->
+    false.
+
+expect_erlang_ffi_undeclared(
+  {error, {in_function, "Main",
+           {undeclared_erlang_function, "lists", "reverse"}}}) -> true;
+expect_erlang_ffi_undeclared(_) -> false.
+
+expect_erlang_ffi_unknown_module(
+  {error, {in_function, "Main", {undeclared_erlang_module, "lists"}}}) -> true;
+expect_erlang_ffi_unknown_module(_) -> false.
+
+expect_erlang_ffi_duplicate(
+  {error, {duplicate_erlang_external, "lists", "sum"}}) -> true;
+expect_erlang_ffi_duplicate(_) -> false.
 
 expect_top_level_local({error, {variable_requires_scope, local}}) ->
     true;

@@ -18,6 +18,7 @@ keyword(<<"function">>) -> {ok, function};
 keyword(<<"fn">>)     -> {ok, fn};
 keyword(<<"import">>) -> {ok, import};
 keyword(<<"export">>) -> {ok, export};
+keyword(<<"extern">>) -> {ok, extern};
 keyword(<<"struct">>) -> {ok, struct};
 keyword(<<"enum">>)   -> {ok, enum};
 keyword(<<"variant">>) -> {ok, variant};

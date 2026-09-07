@@ -1,0 +1,7 @@
+extern Number erlang.lists.sum(List values);
+
+function Number Main(String Args) {
+    local List values = [1, 2, 3];
+    erlang.lists.sum(values);
+    return erlang.lists.sum(values);
+}

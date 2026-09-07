@@ -194,6 +194,24 @@ format({unknown_export, Name}) ->
     {unknown_export,
      io_lib:format("Exported function ~s is not defined.", [Name]),
      "Define the function in this module or remove the export line."};
+format({expected_erlang_external, _Tokens}) ->
+    {expected_erlang_external,
+     "This Erlang external declaration is not valid.",
+     "Use: extern ReturnType erlang.module.function(Type argument);"};
+format({duplicate_erlang_external, ModuleName, FunctionName}) ->
+    {duplicate_erlang_external,
+     io_lib:format("Erlang function ~s:~s is declared more than once.",
+                   [ModuleName, FunctionName]),
+     "Keep one extern declaration for each Erlang module/function pair."};
+format({undeclared_erlang_module, ModuleName}) ->
+    {undeclared_erlang_module,
+     io_lib:format("Erlang module ~s has no selected external functions.", [ModuleName]),
+     "Add an exact extern signature before calling this Erlang module."};
+format({undeclared_erlang_function, ModuleName, FunctionName}) ->
+    {undeclared_erlang_function,
+     io_lib:format("Erlang function ~s:~s has not been selected.",
+                   [ModuleName, FunctionName]),
+     "Add an exact extern signature for this function before calling it."};
 format({function_call_required, Name}) ->
     {function_call_required,
      io_lib:format("~s names a user-defined type, not a function.", [name(Name)]),

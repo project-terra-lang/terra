@@ -76,11 +76,13 @@ run_passes([{Name, Pass} | Rest], Context) ->
 parsing_pass(#{legacy_tokens := Tokens} = Context) ->
     case extract_region_config(Tokens) of
         {ok, RegionConfig, RemainingTokens} ->
-            case parse_module_items(RemainingTokens, [], [], [], [], [], []) of
-                {ok, Imports, Exports, ModuleDeclarations, Records, Enums, Functions} ->
+            case parse_module_items(RemainingTokens, [], [], [], [], [], [], []) of
+                {ok, Imports, Exports, Externals, ModuleDeclarations,
+                 Records, Enums, Functions} ->
                     {ok, Context#{module_declaration_tokens => ModuleDeclarations,
                                   imports => Imports,
                                   exports => Exports,
+                                  externals => Externals,
                                   records => Records,
                                   enums => Enums,
                                   functions => Functions,
@@ -97,23 +99,17 @@ extract_region_config(Tokens) ->
     {ok, auto, Tokens}.
 
 name_resolution_pass(#{records := Records, enums := Enums, imports := Imports,
-                       exports := Exports, functions := Functions} = Context) ->
+                       exports := Exports, externals := Externals,
+                       functions := Functions} = Context) ->
     case duplicate_name(Functions, []) of
         none ->
-            case validate_user_types(Records, Enums, Functions) of
+            case validate_user_types(Records, Enums, Functions, Externals) of
                 ok ->
                     case validate_exports(Exports, Functions) of
                         ok ->
-                            case load_imports(Imports, Context) of
-                                {ok, ResolvedImports, ImportSignatures} ->
-                                    case validate_entry(Context, Functions) of
-                                        {ok, Entry} ->
-                                            {ok, Context#{entry => Entry,
-                                                          imports => ResolvedImports,
-                                                          signatures => signatures(Functions, Records, Enums,
-                                                                                   ImportSignatures)}};
-                                        Error -> Error
-                                    end;
+                            case validate_externals(Externals) of
+                                ok -> resolve_imports_and_entry(Imports, Externals, Records,
+                                                                Enums, Functions, Context);
                                 Error -> Error
                             end;
                         Error -> Error
@@ -122,6 +118,22 @@ name_resolution_pass(#{records := Records, enums := Enums, imports := Imports,
             end;
         "Main" -> {error, duplicate_entry_point};
         Name -> {error, {duplicate_function, Name}}
+    end.
+
+resolve_imports_and_entry(Imports, Externals, Records, Enums, Functions, Context) ->
+    case load_imports(Imports, Context) of
+        {ok, ResolvedImports, ImportSignatures} ->
+            case validate_entry(Context, Functions) of
+                {ok, Entry} ->
+                    Signatures = signatures(Functions, Records, Enums,
+                                            ImportSignatures, Externals),
+                    {ok, Context#{entry => Entry,
+                                  imports => ResolvedImports,
+                                  externals => Externals,
+                                  signatures => Signatures}};
+                Error -> Error
+            end;
+        Error -> Error
     end.
 
 type_checking_pass(#{module_declaration_tokens := ModuleDeclarationTokens,
@@ -147,6 +159,7 @@ type_check_functions(Functions, Records, Enums, Signatures, Entry,
                          module_declarations => ModuleDeclarations,
                          imports => maps:get(imports, Context, []),
                          exports => maps:get(exports, Context, []),
+                         externals => maps:get(externals, Context, []),
                          functions => ParsedFunctions},
             RegionCapacity = case maps:get(region_config, Context, auto) of
                                  auto -> {auto, count_pointer_allocations(Program0)};
@@ -234,45 +247,53 @@ find_function_name(Name, [{id, Name, _Span} | Rest]) -> {ok, Rest};
 find_function_name(_Name, [{lbrace, _Value, _Span} | _Rest]) -> not_found;
 find_function_name(Name, [_Token | Rest]) -> find_function_name(Name, Rest).
 
-parse_module_items([], Imports, Exports, Declarations, Records, Enums, Functions) ->
-    {ok, lists:reverse(Imports), lists:reverse(Exports),
+parse_module_items([], Imports, Exports, Externals, Declarations, Records, Enums, Functions) ->
+    {ok, lists:reverse(Imports), lists:reverse(Exports), lists:reverse(Externals),
      lists:reverse(Declarations), lists:reverse(Records),
      lists:reverse(Enums), lists:reverse(Functions)};
 parse_module_items([{keyword, import}, {id, Name}, {endofline, ";"} | Rest],
-                   Imports, Exports, Declarations, Records, Enums, Functions) ->
-    parse_module_items(Rest, [#{name => Name} | Imports], Exports,
+                   Imports, Exports, Externals, Declarations, Records, Enums, Functions) ->
+    parse_module_items(Rest, [#{name => Name} | Imports], Exports, Externals,
                        Declarations, Records, Enums, Functions);
 parse_module_items([{keyword, export}, {id, Name}, {endofline, ";"} | Rest],
-                   Imports, Exports, Declarations, Records, Enums, Functions) ->
-    parse_module_items(Rest, Imports, [#{name => Name} | Exports],
+                   Imports, Exports, Externals, Declarations, Records, Enums, Functions) ->
+    parse_module_items(Rest, Imports, [#{name => Name} | Exports], Externals,
                        Declarations, Records, Enums, Functions);
+parse_module_items([{keyword, extern} | Rest], Imports, Exports, Externals,
+                   Declarations, Records, Enums, Functions) ->
+    case parse_external(Rest) of
+        {ok, External, Remaining} ->
+            parse_module_items(Remaining, Imports, Exports, [External | Externals],
+                               Declarations, Records, Enums, Functions);
+        Error -> Error
+    end;
 parse_module_items([{keyword, struct}, {id, Name}, {lbrace, "{"} | Rest],
-                   Imports, Exports, Declarations, Records, Enums, Functions) ->
+                   Imports, Exports, Externals, Declarations, Records, Enums, Functions) ->
     case parse_record_body(Rest, [], [], []) of
         {ok, Fields, NestedRecords, NestedEnums, Remaining} ->
             Record = #{kind => struct, name => Name, fields => Fields},
-            parse_module_items(Remaining, Imports, Exports, Declarations,
+            parse_module_items(Remaining, Imports, Exports, Externals, Declarations,
                                add_user_types([Record | NestedRecords], Records),
                                add_user_types(NestedEnums, Enums), Functions);
         Error -> Error
     end;
 parse_module_items([{keyword, enum}, {id, Name}, {lbrace, "{"} | Rest],
-                   Imports, Exports, Declarations, Records, Enums, Functions) ->
+                   Imports, Exports, Externals, Declarations, Records, Enums, Functions) ->
     case parse_enum_body(Rest, [], [], []) of
         {ok, Variants, NestedRecords, NestedEnums, Remaining} ->
             Enum = #{kind => enum, name => Name, variants => Variants},
-            parse_module_items(Remaining, Imports, Exports, Declarations,
+            parse_module_items(Remaining, Imports, Exports, Externals, Declarations,
                                add_user_types(NestedRecords, Records),
                                add_user_types([Enum | NestedEnums], Enums), Functions);
         Error -> Error
     end;
 parse_module_items([{keyword, function} | Rest], Imports, Exports,
-                   Declarations, Records, Enums, Functions) ->
+                   Externals, Declarations, Records, Enums, Functions) ->
     case parse_return_types(Rest) of
         {ok, Types, [{id, Name}, {lparen, "("} | ParamTokens]} ->
             case parse_function(Name, Types, ParamTokens) of
                 {ok, Function, Remaining} ->
-                    parse_module_items(Remaining, Imports, Exports,
+                    parse_module_items(Remaining, Imports, Exports, Externals,
                                        Declarations, Records, Enums,
                                        [Function | Functions]);
                 Error -> Error
@@ -281,29 +302,52 @@ parse_module_items([{keyword, function} | Rest], Imports, Exports,
         Error -> Error
     end;
 parse_module_items([{keyword, global} | _] = Tokens, Imports, Exports,
-                   Declarations, Records, Enums, Functions) ->
-    parse_module_declaration_tokens(Tokens, Imports, Exports,
+                   Externals, Declarations, Records, Enums, Functions) ->
+    parse_module_declaration_tokens(Tokens, Imports, Exports, Externals,
                                     Declarations, Records, Enums, Functions);
 parse_module_items([{keyword, const} | _] = Tokens, Imports, Exports,
-                   Declarations, Records, Enums, Functions) ->
-    parse_module_declaration_tokens(Tokens, Imports, Exports,
+                   Externals, Declarations, Records, Enums, Functions) ->
+    parse_module_declaration_tokens(Tokens, Imports, Exports, Externals,
                                     Declarations, Records, Enums, Functions);
 parse_module_items([{keyword, Scope} | _] = Tokens,
-                   _Imports, _Exports, _Declarations, _Records, _Enums, _Functions)
+                   _Imports, _Exports, _Externals, _Declarations, _Records, _Enums, _Functions)
   when Scope == local; Scope == temp ->
     {error, {variable_requires_scope, Scope, Tokens}};
-parse_module_items(Other, _Imports, _Exports, _Declarations, _Records, _Enums, _Functions) ->
+parse_module_items(Other, _Imports, _Exports, _Externals,
+                   _Declarations, _Records, _Enums, _Functions) ->
     {error, {expected_function_declaration, Other}}.
 
 add_user_types(Types, Acc) ->
     lists:reverse(Types) ++ Acc.
 
-parse_module_declaration_tokens(Tokens, Imports, Exports,
+parse_module_declaration_tokens(Tokens, Imports, Exports, Externals,
                                 Declarations, Records, Enums, Functions) ->
     case take_statement(Tokens, 0, []) of
         {ok, Declaration, Rest} ->
-            parse_module_items(Rest, Imports, Exports, [Declaration | Declarations],
+            parse_module_items(Rest, Imports, Exports, Externals,
+                               [Declaration | Declarations],
                                Records, Enums, Functions);
+        Error -> Error
+    end.
+
+parse_external(Tokens) ->
+    case parse_return_types(Tokens) of
+        {ok, ReturnTypes,
+         [{id, "erlang"}, {dot, "."}, {id, ModuleName}, {dot, "."},
+          {id, FunctionName}, {lparen, "("} | ParamTokens]} ->
+            case parse_parameters(ParamTokens, []) of
+                {ok, Params, [{endofline, ";"} | Rest]} ->
+                    case duplicate_param_name(Params) of
+                        none ->
+                            {ok, #{kind => erlang_ffi, module => ModuleName,
+                                   function => FunctionName, params => Params,
+                                   return_types => ReturnTypes}, Rest};
+                        Duplicate -> {error, {duplicate_variable, Duplicate}}
+                    end;
+                {ok, _Params, Other} -> {error, {expected_endofline, Other}};
+                Error -> Error
+            end;
+        {ok, _ReturnTypes, Other} -> {error, {expected_erlang_external, Other}};
         Error -> Error
     end.
 
@@ -584,7 +628,7 @@ validate_exports(Exports, Functions) ->
         Name -> {error, {duplicate_export, Name}}
     end.
 
-signatures(Functions, Records, Enums, ImportSignatures) ->
+signatures(Functions, Records, Enums, ImportSignatures, Externals) ->
     FunctionSignatures =
         [{maps:get(name, F), #{kind => function, params => maps:get(params, F),
                               return_types => maps:get(return_types, F)}} || F <- Functions],
@@ -595,8 +639,29 @@ signatures(Functions, Records, Enums, ImportSignatures) ->
     EnumSignatures =
         [{maps:get(name, E), #{kind => enum, variants => maps:get(variants, E),
                               return_types => [{named, maps:get(name, E)}]}} || E <- Enums],
+    ExternalSignatures =
+        [{{ffi, maps:get(module, External), maps:get(function, External)},
+          #{kind => erlang_ffi, params => maps:get(params, External),
+            return_types => maps:get(return_types, External)}}
+         || External <- Externals],
     maps:from_list(FunctionSignatures ++ RecordSignatures ++ EnumSignatures ++
-                   ImportSignatures).
+                   ImportSignatures ++ ExternalSignatures).
+
+validate_externals(Externals) ->
+    Keys = [{maps:get(module, External), maps:get(function, External)}
+            || External <- Externals],
+    case first_duplicate(Keys, []) of
+        none -> ok;
+        {ModuleName, FunctionName} ->
+            {error, {duplicate_erlang_external, ModuleName, FunctionName}}
+    end.
+
+first_duplicate([], _Seen) -> none;
+first_duplicate([Value | Rest], Seen) ->
+    case lists:member(Value, Seen) of
+        true -> Value;
+        false -> first_duplicate(Rest, [Value | Seen])
+    end.
 
 load_imports([], _Context) ->
     {ok, [], []};
@@ -640,7 +705,13 @@ imported_module(ModuleName, Sigs) ->
               end,
               maps:to_list(Sigs)).
 
-validate_user_types(Records, Enums, Functions) ->
+external_module(ModuleName, Sigs) ->
+    lists:any(fun({{ffi, Name, _Function}, _Signature}) -> Name == ModuleName;
+                 (_) -> false
+              end,
+              maps:to_list(Sigs)).
+
+validate_user_types(Records, Enums, Functions, Externals) ->
     UserTypes = Records ++ Enums,
     case duplicate_name(UserTypes, []) of
         none ->
@@ -648,19 +719,22 @@ validate_user_types(Records, Enums, Functions) ->
             case [maps:get(name, T) || T <- UserTypes,
                   lists:member(maps:get(name, T), FunctionNames)] of
                 [Name | _] -> {error, {duplicate_definition, Name}};
-                [] -> validate_declared_types(Records, Enums, Functions)
+                [] -> validate_declared_types(Records, Enums, Functions, Externals)
             end;
         Name -> {error, {duplicate_user_type, Name}}
     end.
 
-validate_declared_types(Records, Enums, Functions) ->
+validate_declared_types(Records, Enums, Functions, Externals) ->
     Names = [maps:get(name, T) || T <- Records ++ Enums],
     Types = [maps:get(type, Field) || R <- Records, Field <- maps:get(fields, R)] ++
             [maps:get(type, Field) || E <- Enums, V <- maps:get(variants, E),
                                       Field <- maps:get(fields, V)] ++
             [Type || F <- Functions,
                      Type <- maps:get(return_types, F) ++
-                             [maps:get(type, P) || P <- maps:get(params, F)]],
+                             [maps:get(type, P) || P <- maps:get(params, F)]] ++
+            [Type || External <- Externals,
+                     Type <- maps:get(return_types, External) ++
+                             [maps:get(type, P) || P <- maps:get(params, External)]],
     ReferencedNames = lists:append([named_type_names(Type) || Type <- Types]),
     case [Name || Name <- ReferencedNames, not lists:member(Name, Names)] of
         [Name | _] -> {error, {unknown_user_type, Name}};
@@ -927,6 +1001,17 @@ parse_statements([{keyword, return} | Rest], F, Sigs, Env, Acc) ->
                     end;
                 Error -> Error
             end;
+        Error -> Error
+    end;
+parse_statements([{id, "erlang"}, {dot, "."}, {id, ModuleName}, {dot, "."},
+                  {id, FunctionName}, {lparen, "("} | Rest], F, Sigs, Env, Acc) ->
+    case parse_ffi_call(ModuleName, FunctionName, Rest, Sigs, Env) of
+        {ok, {ffi_call, ModuleName, FunctionName, Args},
+         [{endofline, ";"} | Remaining]} ->
+            Statement = #{kind => ffi_call, module => ModuleName,
+                          function => FunctionName, args => Args},
+            parse_statements(Remaining, F, Sigs, Env, [Statement | Acc]);
+        {ok, _Call, Other} -> {error, {expected_endofline, Other}};
         Error -> Error
     end;
 parse_statements([{id, Name}, {lparen, "("} | Rest], F, Sigs, Env, Acc) ->
@@ -1768,6 +1853,9 @@ parse_primary([{keyword, V} | Rest], _Sigs, _Env) when V == null; V == nil ->
     {ok, null, Rest};
 parse_primary([{atomprefix, ":"}, {id, Name} | Rest], _Sigs, _Env) ->
     {ok, {atom, list_to_atom(Name)}, Rest};
+parse_primary([{id, "erlang"}, {dot, "."}, {id, ModuleName}, {dot, "."},
+               {id, FunctionName}, {lparen, "("} | Rest], Sigs, Env) ->
+    parse_ffi_call(ModuleName, FunctionName, Rest, Sigs, Env);
 parse_primary([{id, ModuleName}, {dot, "."}, {id, FunctionName},
                {lparen, "("} | Rest], Sigs, Env) ->
     case imported_module(ModuleName, Sigs) of
@@ -1969,6 +2057,21 @@ parse_remote_call(ModuleName, FunctionName, Tokens, Sigs, Env) ->
         Error -> Error
     end.
 
+parse_ffi_call(ModuleName, FunctionName, [{rparen, ")"} | Rest], Sigs, Env) ->
+    case validate_call({ffi, ModuleName, FunctionName}, [], Sigs, Env) of
+        {ok, _} -> {ok, {ffi_call, ModuleName, FunctionName, []}, Rest};
+        Error -> Error
+    end;
+parse_ffi_call(ModuleName, FunctionName, Tokens, Sigs, Env) ->
+    case parse_sequence(Tokens, rparen, call_args, [], Sigs, Env) of
+        {ok, {call_args, Args}, Rest} ->
+            case validate_call({ffi, ModuleName, FunctionName}, Args, Sigs, Env) of
+                {ok, _} -> {ok, {ffi_call, ModuleName, FunctionName, Args}, Rest};
+                Error -> Error
+            end;
+        Error -> Error
+    end.
+
 call_expression(Name, Args, Sigs) when is_list(Name) ->
     case maps:find(Name, Sigs) of
         {ok, #{kind := struct, fields := Fields}} ->
@@ -2052,6 +2155,8 @@ validate_call(restricted_map, Args, Sigs, Env) ->
     validate_restricted_map(Args, Sigs, Env);
 validate_call({remote, ModuleName, FunctionName}, Args, Sigs, Env) ->
     validate_remote_call(ModuleName, FunctionName, Args, Sigs, Env);
+validate_call({ffi, ModuleName, FunctionName}, Args, Sigs, Env) ->
+    validate_ffi_call(ModuleName, FunctionName, Args, Sigs, Env);
 validate_call(Name, Args, Sigs, Env)
   when Name == number; Name == int; Name == sint; Name == float ->
     validate_numeric_conversion(Name, Args, Sigs, Env);
@@ -2088,6 +2193,27 @@ validate_remote_call(ModuleName, FunctionName, Args, Sigs, Env) ->
             case imported_module(ModuleName, Sigs) of
                 true -> {error, {unknown_imported_function, ModuleName, FunctionName}};
                 false -> {error, {unknown_import, ModuleName}}
+            end
+    end.
+
+validate_ffi_call(ModuleName, FunctionName, Args, Sigs, Env) ->
+    case maps:find({ffi, ModuleName, FunctionName}, Sigs) of
+        {ok, #{params := Params, return_types := Returns}} ->
+            Expected = [maps:get(type, Param) || Param <- Params],
+            case expression_types(Args, Sigs, Env, []) of
+                {ok, Actual} ->
+                    case types_accept(Expected, Actual) of
+                        true -> {ok, Returns};
+                        false -> {error, {argument_type_mismatch,
+                                          "erlang." ++ ModuleName ++ "." ++ FunctionName,
+                                          Expected, Actual}}
+                    end;
+                Error -> Error
+            end;
+        error ->
+            case external_module(ModuleName, Sigs) of
+                true -> {error, {undeclared_erlang_function, ModuleName, FunctionName}};
+                false -> {error, {undeclared_erlang_module, ModuleName}}
             end
     end.
 
@@ -2260,6 +2386,8 @@ infer_types({pipe_call, Left, Name, Args}, Sigs, Env) ->
     validate_call(Name, [Left | Args], Sigs, Env);
 infer_types({remote_call, ModuleName, FunctionName, Args}, Sigs, Env) ->
     validate_call({remote, ModuleName, FunctionName}, Args, Sigs, Env);
+infer_types({ffi_call, ModuleName, FunctionName, Args}, Sigs, Env) ->
+    validate_call({ffi, ModuleName, FunctionName}, Args, Sigs, Env);
 infer_types({call, Name, Args}, Sigs, Env) -> validate_call(Name, Args, Sigs, Env);
 infer_types({binary, Op, Left, Right}, Sigs, Env) ->
     case {single_type(Left, Sigs, Env), single_type(Right, Sigs, Env)} of

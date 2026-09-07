@@ -62,7 +62,7 @@ new features should arrive in small, understandable steps.
 
 ## Milestone 4: Erlang and BEAM Interop
 
-- [ ] Add an explicit Erlang FFI for calling selected Erlang modules/functions
+- [x] Add an explicit Erlang FFI for calling selected Erlang modules/functions
 - [ ] Map Terra values predictably to Erlang terms
 - [ ] Allow Erlang code to call exported Terra functions
 - [ ] Support the BEAM types Terra needs most: binaries, PIDs, references, and maps
