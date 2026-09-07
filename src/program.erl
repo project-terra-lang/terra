@@ -946,7 +946,33 @@ parse_expr_list(Tokens, Close, Sigs, Env, Acc) ->
     end.
 
 parse_expr(Tokens, Sigs, Env) ->
-    parse_or(Tokens, Sigs, Env).
+    case parse_or(Tokens, Sigs, Env) of
+        {ok, Left, Rest} -> parse_pipe_rest(Left, Rest, Sigs, Env);
+        Error -> Error
+    end.
+
+parse_pipe_rest(Left, [{pipe_op, "|>"} | Rest], Sigs, Env) ->
+    case parse_pipe_target(Rest, Sigs, Env) of
+        {ok, Name, Args, Remaining} ->
+            case validate_call(Name, [Left | Args], Sigs, Env) of
+                {ok, _Types} ->
+                    parse_pipe_rest({pipe_call, Left, Name, Args}, Remaining, Sigs, Env);
+                Error -> Error
+            end;
+        Error -> Error
+    end;
+parse_pipe_rest(Left, Rest, _Sigs, _Env) ->
+    {ok, Left, Rest}.
+
+parse_pipe_target([{id, Name}, {lparen, "("}, {rparen, ")"} | Rest], _Sigs, _Env) ->
+    {ok, Name, [], Rest};
+parse_pipe_target([{id, Name}, {lparen, "("} | Rest], Sigs, Env) ->
+    case parse_sequence(Rest, rparen, call_args, [], Sigs, Env) of
+        {ok, {call_args, Args}, Remaining} -> {ok, Name, Args, Remaining};
+        Error -> Error
+    end;
+parse_pipe_target(Other, _Sigs, _Env) ->
+    {error, {pipe_requires_function_call, Other}}.
 
 parse_or(Tokens, Sigs, Env) ->
     case parse_and(Tokens, Sigs, Env) of
@@ -1239,6 +1265,8 @@ infer_types({var_ref, Name}, _Sigs, Env) ->
         error -> {error, {unknown_variable, Name}}
     end;
 infer_types({try_call, Name, Args}, Sigs, Env) -> validate_call(Name, Args, Sigs, Env);
+infer_types({pipe_call, Left, Name, Args}, Sigs, Env) ->
+    validate_call(Name, [Left | Args], Sigs, Env);
 infer_types({call, Name, Args}, Sigs, Env) -> validate_call(Name, Args, Sigs, Env);
 infer_types({binary, Op, Left, Right}, Sigs, Env) ->
     case {single_type(Left, Sigs, Env), single_type(Right, Sigs, Env)} of

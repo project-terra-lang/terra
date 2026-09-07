@@ -68,6 +68,9 @@ for their member count and `.members` for a list of key/value tuples.
 - `try name();` invokes a user function with explicit failure propagation:
   successful values are unchanged, while failures retain their BEAM reason and
   Terra stack. Bare calls remain valid in language version 0.
+- `value |> Next(extra)` passes `value` as the first argument to `Next`, chains
+  left-to-right, and propagates failures with the same reason and Terra stack as
+  `try`.
 - `name;` invokes a zero-argument function successfully at most once per
   generated module and BEAM process; `name()` always invokes normally.
 - Terra programs run through one fixed entry point:

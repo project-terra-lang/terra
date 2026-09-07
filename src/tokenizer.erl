@@ -104,6 +104,8 @@ tokenize(<<"&&", Rest/binary>>, Acc, Line, Column, Offset) ->
     emit(and_and, "&&", <<"&&">>, Rest, Acc, Line, Column, Offset);
 tokenize(<<"||", Rest/binary>>, Acc, Line, Column, Offset) ->
     emit(or_or, "||", <<"||">>, Rest, Acc, Line, Column, Offset);
+tokenize(<<"|>", Rest/binary>>, Acc, Line, Column, Offset) ->
+    emit(pipe_op, "|>", <<"|>">>, Rest, Acc, Line, Column, Offset);
 tokenize(<<"::", Rest/binary>>, Acc, Line, Column, Offset) ->
     emit(colon_colon, "::", <<"::">>, Rest, Acc, Line, Column, Offset);
 

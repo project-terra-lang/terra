@@ -286,6 +286,19 @@ unchanged, allowing `terra run` to retain the originating Terra source frame.
 Constructors and non-call expressions reject `try`. Bare calls remain valid in
 Terra v0 for compatibility; `try` documents and preserves explicit propagation.
 
+The pipe operator passes its left value as the first argument of the user
+function on its right. Pipelines associate left-to-right:
+
+```terra
+return 2 |> Increment() |> Add(3);
+```
+
+This is equivalent to `Add(Increment(2), 3)`. Each stage is type checked using
+the inserted first argument. A failure in the left expression or any called
+stage propagates its original BEAM class, reason, stack, and Terra source frame.
+The right side must be a user-function call; a returned final stage continues
+to use Terra's tail-call dispatch.
+
 Member access chains use dots. Map `.count` and `.members` have the concrete
 types described above; ordinary key access currently infers to `Var`:
 
@@ -466,7 +479,8 @@ for_range_stmt  = "for", call_to_range, block ;
 while_stmt      = "while", expr, block ;
 do_while_stmt   = "do_while", expr, block ;
 
-expr            = logical_or ;
+expr            = pipe ;
+pipe            = logical_or, { "|>", call } ;
 logical_or      = logical_and, { "||", logical_and } ;
 logical_and     = comparison, { "&&", comparison } ;
 comparison      = additive, [ comp_op, additive ] ;

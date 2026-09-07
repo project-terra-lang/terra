@@ -42,7 +42,7 @@ compiler.
 - [X] Add a New Data Type Called "RestrictedMap" which is similar to a map but it allows you to specify the length of the map and the amount u can store in this, this type has a property called count that will return the count of the items in the map, this property also exists for the normal Map type, and the Map types will have a property called members which returns the members of the map
 - [X] Add deterministic compiler output and stable diagnostic codes for tools
 - [X] Add Zigs "try" keyword to make the function run because by default functions can fail in this langauge
-- [ ] Add error propagation via the pipe operator "|>" if the pipe operator is used the error will get propagated via the program
+- [X] Add error propagation via the pipe operator "|>" if the pipe operator is used the error will get propagated via the program
 
 ## Milestone 2: Testing and Quality
 

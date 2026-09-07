@@ -3,6 +3,7 @@
 main(_Args) ->
     code:add_pathz("./ebin"),
     Cases = [{"token spans", fun expect_token_spans/0},
+             {"pipe operator token", fun expect_pipe_token/0},
              {"program ast span", fun expect_program_span/0}],
     Results = [run_case(Case) || Case <- Cases],
     case lists:member(fail, Results) of
@@ -32,6 +33,11 @@ expect_token_spans() ->
     span_start(FirstSpan) == #{line => 1, column => 1, offset => 0} andalso
     span_start(XSpan) == #{line => 1, column => 11, offset => 10} andalso
     span_start(StdoutSpan) == #{line => 2, column => 1, offset => 18}.
+
+expect_pipe_token() ->
+    [{int, 2, _}, {pipe_op, "|>", Span}, {id, "Increment", _},
+     {lparen, "(", _}, {rparen, ")", _}] = tokenizer:tokenize(<<"2 |> Increment()">>),
+    span_start(Span) == #{line => 1, column => 3, offset => 2}.
 
 expect_program_span() ->
     case program:parse_file("tests/programs/main_ok.terra") of

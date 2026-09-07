@@ -120,7 +120,29 @@ is_type(var)   -> true;
 is_type(Type)  -> datatypes:is_type(Type).
 
 parse_expr(Tokens) ->
-    parse_or(Tokens).
+    case parse_or(Tokens) of
+        {ok, Left, Rest} -> parse_pipe_rest(Left, Rest);
+        {error, Reason} -> {error, Reason}
+    end.
+
+parse_pipe_rest(Left, [{pipe_op, "|>"} | Rest]) ->
+    case parse_pipe_target(Rest) of
+        {ok, Name, Args, Remaining} ->
+            parse_pipe_rest({pipe_call, Left, Name, Args}, Remaining);
+        {error, Reason} -> {error, Reason}
+    end;
+parse_pipe_rest(Left, Rest) ->
+    {ok, Left, Rest}.
+
+parse_pipe_target([{id, Name}, {lparen, "("}, {rparen, ")"} | Rest]) ->
+    {ok, Name, [], Rest};
+parse_pipe_target([{id, Name}, {lparen, "("} | Rest]) ->
+    case parse_sequence(Rest, rparen, call_args, []) of
+        {ok, {call_args, Args}, Remaining} -> {ok, Name, Args, Remaining};
+        {error, Reason} -> {error, Reason}
+    end;
+parse_pipe_target(Other) ->
+    {error, {pipe_requires_function_call, Other}}.
 
 parse_or(Tokens) ->
     case parse_and(Tokens) of
@@ -627,6 +649,8 @@ infer_type({call, restricted_map, Args}, Env) ->
     infer_restricted_map(Args, Env);
 infer_type({try_call, Name, Args}, Env) ->
     infer_type({call, Name, Args}, Env);
+infer_type({pipe_call, Left, Name, Args}, Env) ->
+    infer_type({call, Name, [Left | Args]}, Env);
 infer_type({call, Name, Args}, Env) ->
     case infer_type_list(Args, Env) of
         ok -> {ok, {call, Name}};

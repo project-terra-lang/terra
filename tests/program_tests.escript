@@ -104,6 +104,10 @@ main(_Args) ->
               fun expect_try_propagation/1},
              {"try requires function call", "tests/programs/try_invalid.terra",
               fun expect_invalid_try/1},
+             {"pipe propagation chain", "tests/programs/pipe_success.terra",
+              fun expect_pipe_propagation/1},
+             {"pipe requires function call", "tests/programs/pipe_invalid.terra",
+              fun expect_invalid_pipe/1},
              {"branch binding does not leak", "tests/programs/branch_binding_leak.terra",
               fun expect_branch_binding_leak/1},
              {"switch binding does not leak", "tests/programs/switch_binding_leak.terra",
@@ -185,6 +189,21 @@ expect_try_propagation(_) -> false.
 expect_invalid_try({error, {in_function, "Main",
                             {try_requires_function_call, {int, 1}}}}) -> true;
 expect_invalid_try(_) -> false.
+
+expect_pipe_propagation({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    [Return] = [Statement || Statement <- maps:get(statements, Main),
+                             maps:get(kind, Statement) == return],
+    maps:get(values, Return) ==
+        [{pipe_call, {pipe_call, {int, 2}, "Increment", []}, "Add", [{int, 3}]}];
+expect_pipe_propagation(_) -> false.
+
+expect_invalid_pipe({error, {in_function, "Main",
+                             {pipe_requires_function_call, _Tokens}}}) -> true;
+expect_invalid_pipe({error, {in_function, "Main",
+                             {with_span, {pipe_requires_function_call, _Tokens}, Span}}}) ->
+    maps:get(line, maps:get(start, Span)) == 2;
+expect_invalid_pipe(_) -> false.
 
 find_function(Name, Functions) ->
     hd([Function || Function <- Functions, maps:get(name, Function) == Name]).

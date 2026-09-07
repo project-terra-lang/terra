@@ -158,6 +158,8 @@ tail_calls(#{kind := return, values := [{call, Name, Args}]}) when is_list(Name)
     [{Name, length(Args)}];
 tail_calls(#{kind := return, values := [{try_call, Name, Args}]}) ->
     [{Name, length(Args)}];
+tail_calls(#{kind := return, values := [{pipe_call, _Left, Name, Args}]}) ->
+    [{Name, length(Args) + 1}];
 tail_calls(Value) when is_map(Value) ->
     lists:append([tail_calls(Child) || Child <- maps:values(Value)]);
 tail_calls(Value) when is_list(Value) ->
@@ -257,6 +259,13 @@ generate_statement(#{kind := return, values := [{call, Name, Args}]}, Env, Count
 generate_statement(#{kind := return, values := [{try_call, Name, Args}]}, Env, Counter,
                    Level, _FunctionName) ->
     TailArgs = [expression(Arg, Env) || Arg <- Args],
+    Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
+            lists:join(", ", TailArgs), "]})"],
+    {[indent(Level), Code], Env, Counter};
+generate_statement(#{kind := return,
+                     values := [{pipe_call, Left, Name, Args}]}, Env, Counter,
+                   Level, _FunctionName) ->
+    TailArgs = [expression(Left, Env) | [expression(Arg, Env) || Arg <- Args]],
     Code = ["throw({terra_tail_call, ", io_lib:format("~p", [Name]), ", [",
             lists:join(", ", TailArgs), "]})"],
     {[indent(Level), Code], Env, Counter};
@@ -409,7 +418,14 @@ expression({binary, Op, Left, Right}, Env) ->
     ["(", expression(Left, Env), " ", operator(Op), " ", expression(Right, Env), ")"];
 expression({try_call, Name, Args}, Env) ->
     ["terra_try(fun() -> ", function_call(Name, Args, Env), " end)"];
+expression({pipe_call, Left, Name, Args}, Env) ->
+    ["terra_pipe(fun() -> ", expression(Left, Env), " end, ",
+     "fun(TerraPipeValue) -> ", pipe_function_call(Name, Args, Env), " end)"];
 expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
+
+pipe_function_call(Name, Args, Env) ->
+    [function_name(Name), "(TerraPipeValue",
+     [[", ", expression(Arg, Env)] || Arg <- Args], ")"].
 
 function_call(Name, Args, Env) when is_list(Name) ->
     [function_name(Name), "(",
@@ -581,6 +597,8 @@ runtime_helpers() ->
     "    catch\n"
     "        Class:Reason:Stacktrace -> erlang:raise(Class, Reason, Stacktrace)\n"
     "    end.\n\n"
+    "terra_pipe(ValueFun, NextFun) ->\n"
+    "    terra_try(fun() -> NextFun(ValueFun()) end).\n\n"
     "terra_range(Limit) when Limit =< 0 -> [];\n"
     "terra_range(Limit) -> lists:seq(0, trunc(Limit) - 1).\n\n"
     "terra_for_range(Limit, Fun) -> lists:foreach(Fun, terra_range(Limit)).\n\n"

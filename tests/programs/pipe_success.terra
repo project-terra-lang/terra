@@ -1,0 +1,11 @@
+function Int Increment(Int value) {
+    return value + 1;
+}
+
+function Int Add(Int value, Int extra) {
+    return value + extra;
+}
+
+function Number Main(String Args) {
+    return 2 |> Increment() |> Add(3);
+}

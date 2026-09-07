@@ -9,6 +9,7 @@ main(_Args) ->
                test_compile(Path, OutDir), test_run(Path, OutDir),
                test_short_circuit(OutDir), test_numeric_rules(OutDir),
                test_try_success(OutDir), test_try_failure(OutDir),
+               test_pipe_success(OutDir), test_pipe_failure(OutDir),
                test_tail_recursion(OutDir),
                test_once_semantics(OutDir), test_once_failure(OutDir),
                test_once_reentrancy(OutDir),
@@ -147,6 +148,32 @@ test_try_failure(OutDir) ->
                    has_terra_frame(Stacktrace, Path));
         Other ->
             io:format("not ok - try propagates function failures~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_pipe_success(OutDir) ->
+    Path = "tests/programs/pipe_success.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_pipe_success, Source},
+         {ok, terra_pipe_success, 6, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("pipe injects values and chains left-to-right",
+                   contains(Binary, <<"terra_pipe(fun() -> 2 end">>) andalso
+                   contains(Binary, <<"terra_fn_add(TerraTailArg1, TerraTailArg2)">>));
+        Other ->
+            io:format("not ok - pipe injects values and chains left-to-right~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_pipe_failure(OutDir) ->
+    Path = "tests/programs/pipe_failure.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {error, {runtime_error, error, badarith, Stacktrace}} ->
+            expect("pipe propagates function failures",
+                   has_terra_frame(Stacktrace, Path));
+        Other ->
+            io:format("not ok - pipe propagates function failures~n  got: ~p~n", [Other]),
             fail
     end.
 

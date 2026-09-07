@@ -167,6 +167,10 @@ format({try_requires_function_call, _Value}) ->
     {try_requires_function_call,
      "try must be followed by a user-function call.",
      "Write try Function(arguments); constructors and ordinary values do not need try."};
+format({pipe_requires_function_call, _Tokens}) ->
+    {pipe_requires_function_call,
+     "The right side of |> must be a user-function call.",
+     "Write value |> Function(arguments); the piped value becomes the first argument."};
 format(null_not_allowed) ->
     {null_not_allowed,
      "null and nil are not valid variable values.",

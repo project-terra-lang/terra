@@ -40,6 +40,10 @@ format_statement(#{kind := call, name := Name, invocation := Invocation} = State
                   end,
     [spaces(Indent), "- calls ", display_name(Name), " ",
      invocation(Invocation), Propagation, Recursive, "\n"];
+format_statement(#{kind := return, values := [{pipe_call, _, _, _} = Pipeline]},
+                 _FunctionName, Indent) ->
+    [spaces(Indent), io_lib:format("- returns a ~p-stage propagating pipeline\n",
+                                  [pipe_stages(Pipeline)])];
 format_statement(#{kind := return, values := Values}, _FunctionName, Indent) ->
     Count = length(Values),
     [spaces(Indent), io_lib:format("- returns ~p ~s\n", [Count, plural(Count, "value")])];
@@ -97,6 +101,9 @@ spaces(Indent) -> lists:duplicate(Indent * 2, $\s).
 
 plural(1, Word) -> Word;
 plural(_Count, Word) -> Word ++ "s".
+
+pipe_stages({pipe_call, Left, _Name, _Args}) -> 1 + pipe_stages(Left);
+pipe_stages(_Value) -> 0.
 
 type_name(number) -> "Number";
 type_name(int) -> "Int";
