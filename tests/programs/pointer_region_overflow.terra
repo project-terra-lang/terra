@@ -1,0 +1,7 @@
+temp region(1);
+
+function Number Main(String Args) {
+    local *String first = "one";
+    local *String second = "two";
+    return 0;
+}

@@ -6,10 +6,11 @@ VM. The language should stay simple and grow incrementally.
 
 ## Program Shape
 
-A Terra source file contains optional module-scope `global` and `const`
-declarations followed by function declarations. `local`, `temp`, and ordinary
-statements are only valid inside a function or block scope. Every valid program
-must declare exactly one entry point:
+A Terra source file may begin with one optional `temp region(capacity);`
+configuration, followed by module-scope `global` and `const` declarations and
+function declarations. Other `local`, `temp`, and ordinary statements are only
+valid inside a function or block scope. Every valid program must declare exactly
+one entry point:
 
 ```terra
 function Number Main(String Args) {
@@ -61,6 +62,9 @@ The current built-in types are:
 ```text
 Number Int SInt Float Atom Bool Map RestrictedMap List Tuple String State Var
 ```
+
+Any built-in or user-defined type may be wrapped in a temporary-region pointer
+type by prefixing it with `*`, such as `*String` or `*Player`.
 
 `Number` accepts `Int`, `SInt`, and `Float` values. `Var` asks the compiler to
 infer the concrete type from the initializer. `State` is currently accepted as a
@@ -149,6 +153,44 @@ available by their declared field names. Code should check `.tag` before reading
 a variant-specific payload; accessing a field absent from the runtime variant
 raises a missing-map-key error. Enum types may be used for fields, variables,
 parameters, and function returns. Values lower to immutable tagged BEAM maps.
+
+### Temporary-Region Pointers
+
+Pointers provide explicit fake mutability without making ordinary Terra
+bindings reassignable:
+
+```terra
+local *String name = "initial";
+name.* = "Terra";
+stdout(name.*);
+```
+
+A pointer declaration allocates one slot containing its initializer. Prefix
+`*` copies an existing value into a new pointer slot:
+
+```terra
+local String source = "Ada";
+local *String copied = *source;
+```
+
+The postfix `.*` helper reads a slot, and `pointer.* = value;` writes a
+type-compatible value into it. Pointer types are valid in plain local variables,
+function parameters and returns, call arguments, struct fields, and enum
+payloads. Pointer allocation is rejected for `const`, `global`, and `temp`
+storage. It is also kept separate from lazy, computed, atomic, and thread-local
+storage so every pointer has one predictable region lifetime.
+
+The optional first declaration `temp region(N);` sets a fixed capacity of `N`
+pointer slots. Exceeding it raises `terra_temporary_region_full`. Without the
+declaration, the compiler records the number of pointer-producing expressions
+as an initial estimate and the runtime region may grow for repeated function or
+recursive execution.
+
+The generated `main/1` wrapper creates the process-local region before calling
+Terra `Main` and removes it in an `after` block on both success and failure.
+Pointer handles contain their owner process, region reference, and slot. Access
+after cleanup raises `terra_dangling_pointer`; access from another process raises
+`terra_cross_process_pointer`. Terra never exposes a raw machine address.
 
 ## Functions
 
@@ -256,8 +298,8 @@ parsing. The remaining storage forms have runtime semantics:
   created for each function invocation.
 - `computed` creates a local getter and reevaluates its expression on every
   reference. The expression is not evaluated when declared.
-- `temp` currently has function-local lifetime like `local`; it remains a
-  distinct AST scope for future optimization work.
+- A `temp Type` value has immutable function-local lifetime like `local`. The
+  separate module-level `temp region(N);` construct configures pointer capacity.
 
 `global computed`, `global lazy`, and `global thread_local` are rejected because
 their storage/lifetime guarantees conflict.
@@ -515,18 +557,20 @@ This sketch is intentionally small and tracks the current parser. It is not yet
 a formal parser generator grammar.
 
 ```ebnf
-program         = { module_item } ;
+program         = [ region_decl ], { module_item } ;
+region_decl     = "temp", "region", "(", integer, ")", ";" ;
 module_item     = struct_decl | enum_decl | module_decl | function_decl ;
 module_decl     = global_decl | const_decl ;
 struct_decl     = "struct", identifier, "{", { field_decl }, "}" ;
-field_decl      = type, identifier, ";" ;
+field_decl      = value_type, identifier, ";" ;
 enum_decl       = "enum", identifier, "{", { variant_decl }, "}" ;
 variant_decl    = "variant", identifier, [ "(", [ params ], ")" ], ";" ;
 function_decl   = "function", return_types, identifier, "(", [ params ], ")",
                   block ;
-return_types    = type | "(", type, { ",", type }, ")" ;
+return_types    = value_type | "(", value_type, { ",", value_type }, ")" ;
 params          = param, { ",", param } ;
-param           = type, identifier ;
+param           = value_type, identifier ;
+value_type      = type | "*", type ;
 block           = "{", { statement }, "}" ;
 
 statement       = var_decl
@@ -536,6 +580,7 @@ statement       = var_decl
                 | call_stmt
                 | try_call_stmt
                 | once_call_stmt
+                | pointer_write
                 | if_stmt
                 | unless_stmt
                 | switch_stmt
@@ -547,7 +592,8 @@ statement       = var_decl
 global_decl     = "global", [ "const" | "atomic" ], type, identifier, "=",
                   expr, ";" ;
 const_decl      = "const", [ type ], identifier, "=", expr, ";" ;
-var_decl        = scope, [ modifier ], type, identifier, "=", expr, ";" ;
+var_decl        = scope, [ modifier ], value_type, identifier, "=", expr, ";" ;
+pointer_write   = identifier, ".", "*", "=", expr, ";" ;
 destructure_decl = scope, "(", binding, { ",", binding }, ")", "=", expr, ";" ;
 multi_binding   = scope, binding, ",", binding, { ",", binding }, "=", expr, ";" ;
 binding         = type, identifier ;
@@ -582,7 +628,7 @@ logical_and     = comparison, { "&&", comparison } ;
 comparison      = additive, [ comp_op, additive ] ;
 additive        = multiplicative, { add_op, multiplicative } ;
 multiplicative  = unary, { mul_op, unary } ;
-unary           = [ "!" | "-" | "try" ], unary | primary ;
+unary           = [ "!" | "-" | "try" | "*" ], unary | primary ;
 primary         = literal
                 | identifier
                 | call
@@ -596,7 +642,8 @@ primary         = literal
 call            = identifier, "(", [ expr, { ",", expr } ], ")" ;
 variant         = identifier, ".", identifier, "(", [ expr, { ",", expr } ], ")" ;
 restricted_map  = "RestrictedMap", "(", expr, [ ",", expr ], ")" ;
-member          = identifier, ".", identifier, { ".", identifier } ;
+member          = identifier, ".", ( identifier | "*" ),
+                  { ".", ( identifier | "*" ) } ;
 list            = "[", [ expr, { ",", expr } ], "]" ;
 tuple_or_group  = "(", expr, [ ",", expr, { ",", expr } ], ")" ;
 map             = "#(", [ expr, "=>", expr, { ",", expr, "=>", expr } ], ")" ;
@@ -621,5 +668,6 @@ unused parameters, variable shadowing, and ignored user-function return values.
 Warnings are stored in the successful program AST under `warnings`, and
 `terra check` renders them before its final `ok` message.
 
-`temp` has distinct syntax and AST metadata but still shares local function
-lifetime.
+Immutable `temp Type` values have local function lifetime. Temporary-region
+pointer slots instead live for the complete `Main` execution and are cleaned up
+by the generated entry wrapper.

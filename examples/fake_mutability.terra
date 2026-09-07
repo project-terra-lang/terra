@@ -1,0 +1,111 @@
+-- Comprehensive temporary-region fake mutability example.
+-- Run with: ./run.sh run examples/fake_mutability.terra player-session
+
+-- Capacity is measured in pointer slots. This program allocates five.
+temp region(8);
+
+struct PlayerState {
+    *String name;
+    *Int score;
+    *Bool online;
+}
+
+enum PlayerCommand {
+    variant Rename(*String target, String next_name);
+    variant Award(*Int target, Int points);
+    variant SetOnline(*Bool target, Bool value);
+    variant Snapshot(PlayerState player);
+    variant NoOp;
+}
+
+function *String NameHandle(PlayerState player) {
+    -- Returning a pointer aliases the same region slot.
+    return player.name;
+}
+
+function Number Apply(PlayerCommand command) {
+    if command == {
+        case PlayerCommand.Rename(bind target, bind next_name):
+            target.* = next_name;
+            stdout("renamed player to");
+            stdout(target.*);
+            return 1;
+        case PlayerCommand.Award(bind target, bind points):
+            target.* = target.* + points;
+            stdout("new score");
+            stdout(target.*);
+            return target.*;
+        case PlayerCommand.SetOnline(bind target, bind value):
+            target.* = value;
+            stdout("online state changed");
+            stdout(target.*);
+            return 1;
+        case PlayerCommand.Snapshot(bind player):
+            stdout("snapshot");
+            stdout(player.name.*);
+            stdout(player.score.*);
+            stdout(player.online.*);
+            return player.score.*;
+        case PlayerCommand.NoOp():
+            stdout("no operation");
+            return 0;
+        case:
+            stdout("unknown command");
+            return -1;
+    }
+}
+
+function Number Main(String Args) {
+    -- Each plain local *Type declaration allocates one region slot.
+    local *String name = "Guest";
+    local *Int score = 10;
+    local *Bool online = false;
+
+    -- Structs can carry pointers without copying their slots.
+    local PlayerState player = PlayerState(name, score, online);
+
+    stdout("session");
+    stdout(Args);
+    stdout("initial player");
+    stdout(player.name.*);
+    stdout(player.score.*);
+    stdout(player.online.*);
+
+    -- Enum payloads and function arguments preserve pointer identity.
+    local Number renamed = Apply(PlayerCommand.Rename(player.name, "Ada"));
+    local Number awarded = Apply(PlayerCommand.Award(player.score, 32));
+    local Number connected = Apply(PlayerCommand.SetOnline(player.online, true));
+
+    -- A returned pointer aliases the original name slot.
+    local *String name_alias = NameHandle(player);
+    name_alias.* = "Grace";
+    stdout("name through original pointer after alias write");
+    stdout(name.*);
+
+    -- Prefix * copies an immutable value into a new independent slot.
+    local String original_region = "APAC";
+    local *String mutable_region = *original_region;
+    mutable_region.* = "EU";
+    stdout("immutable source and mutable copy");
+    stdout(original_region);
+    stdout(mutable_region.*);
+
+    -- Pointers may themselves point to structs.
+    local *PlayerState player_pointer = player;
+    local PlayerState player_view = player_pointer.*;
+    stdout("profile through pointer-to-struct");
+    stdout(player_view.name.*);
+
+    local Number snapshot_score = Apply(PlayerCommand.Snapshot(player_view));
+    local Number ignored = Apply(PlayerCommand.NoOp());
+
+    -- temp remains an immutable local value, separate from pointer storage.
+    temp String report = "fake mutability example complete";
+    stdout(report);
+    stdout(renamed);
+    stdout(awarded);
+    stdout(connected);
+    stdout(ignored);
+
+    return snapshot_score;
+}

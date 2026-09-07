@@ -93,6 +93,21 @@ format({invalid_storage_combination, Scope, Modifier}) ->
      io_lib:format("The ~s scope cannot be combined with ~s storage.",
                    [name(Scope), name(Modifier)]),
      "Use a local modifier or a plain global/const/atomic declaration."};
+format({invalid_pointer_storage, Scope, Modifier}) ->
+    {invalid_pointer_storage,
+     io_lib:format("Pointer storage cannot use ~s scope with ~s evaluation.",
+                   [name(Scope), name(Modifier)]),
+     "Use a local pointer; const, global, and temp declarations remain immutable."};
+format({pointer_type_mismatch, Expected, Actual}) ->
+    {pointer_type_mismatch,
+     io_lib:format("This pointer stores ~s, but the value is ~s.",
+                   [type_name(Expected), type_name(Actual)]),
+     "Initialize or write the pointer with a value matching its pointee type."};
+format({dereference_non_pointer, Type}) ->
+    {dereference_non_pointer,
+     io_lib:format("The .* helper requires a pointer, but this value is ~s.",
+                   [type_name(Type)]),
+     "Use .* only on a value declared with *Type."};
 format({global_initializer_not_closed, Name}) ->
     {global_initializer_not_closed,
      io_lib:format("Global ~s depends on a lexical variable.", [Name]),
@@ -806,6 +821,7 @@ type_name(tuple) -> "Tuple";
 type_name(string) -> "String";
 type_name(var) -> "Var";
 type_name({named, Name}) -> Name;
+type_name({pointer, Type}) -> ["*", type_name(Type)];
 type_name(Type) -> io_lib:format("~p", [Type]).
 
 statement_name('if') -> "if";

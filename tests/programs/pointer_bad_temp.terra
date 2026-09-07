@@ -1,0 +1,4 @@
+function Number Main(String Args) {
+    temp *String value = "nope";
+    return 0;
+}

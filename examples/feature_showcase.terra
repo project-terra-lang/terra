@@ -1,6 +1,8 @@
 -- Terra feature showcase
 -- Run with: ./run.sh run examples/feature_showcase.terra hello from terra
 
+temp region(1);
+
 struct ShowcasePlayer {
   String name;
   Int score;
@@ -73,6 +75,8 @@ function Number Main(String Args) {
   local SInt debt = -5;
   local Atom status = :ready;
   local Bool enabled = true;
+  local *String mutable_label = "before";
+  mutable_label.* = "after";
 
   SumTo(69420, 10);
 
@@ -86,6 +90,7 @@ function Number Main(String Args) {
   stdout(ratio);
   stdout(debt);
   stdout(status);
+  stdout(mutable_label.*);
   stdout(showcase_name);
 
   -- Lists, tuples, maps, member access, and destructuring.

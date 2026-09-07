@@ -79,15 +79,31 @@ generate_module(Module, #{functions := Functions} = Program) ->
     SourcePath = maps:get(source_path, Program, "terra_source"),
     ModuleDeclarations = maps:get(module_declarations, Program, []),
     MainLine = function_source_line("Main", Functions),
+    RegionCapacity = maps:get(region_capacity, Program, {auto, 0}),
+    UsesPointers = uses_pointer_region(RegionCapacity),
     ["-module(", atom_to_list(Module), ").\n",
      "-export([main/1]).\n\n",
      source_attribute(SourcePath, MainLine),
-     "main(Args) ->\n",
-     "    terra_fn_main(terra_args(Args)).\n\n",
+     main_wrapper(RegionCapacity, UsesPointers),
      [generate_function(Function#{module_declarations => ModuleDeclarations}, SourcePath)
-      || Function <- Functions],
+     || Function <- Functions],
      "-file(\"terra_runtime\", 1).\n",
-     runtime_helpers()].
+     runtime_helpers(),
+     case UsesPointers of true -> pointer_runtime_helpers(); false -> "" end].
+
+uses_pointer_region({fixed, _Capacity}) -> true;
+uses_pointer_region({auto, Estimate}) -> Estimate > 0.
+
+main_wrapper(Capacity, true) ->
+    ["main(Args) ->\n",
+     "    TerraRegion = terra_region_start(", region_capacity(Capacity), "),\n",
+     "    try terra_fn_main(terra_args(Args))\n",
+     "    after terra_region_cleanup(TerraRegion) end.\n\n"];
+main_wrapper(_Capacity, false) ->
+    "main(Args) ->\n    terra_fn_main(terra_args(Args)).\n\n".
+
+region_capacity({fixed, Capacity}) -> integer_to_list(Capacity);
+region_capacity({auto, Estimate}) -> ["{auto, ", integer_to_list(Estimate), "}"].
 
 function_source_line(Name, Functions) ->
     case [maps:get(source_line, Function, 1) || Function <- Functions,
@@ -246,6 +262,10 @@ generate_statement(#{kind := call, name := stdout, args := Args},
     Values = [expression(Arg, Env) || Arg <- Args],
     {[indent(Level), "terra_stdout([", lists:join(", ", Values), "])"],
      Env, Counter};
+generate_statement(#{kind := pointer_write, pointer := Pointer, value := Value},
+                   Env, Counter, Level, _FunctionName) ->
+    {[indent(Level), "terra_pointer_write(", expression(Pointer, Env), ", ",
+      expression(Value, Env), ")"], Env, Counter};
 generate_statement(#{kind := call, name := Name, args := Args,
                      invocation := Invocation} = Statement,
                    Env, Counter, Level, _FunctionName) ->
@@ -464,6 +484,10 @@ expression({variant, EnumName, VariantName, Fields}, Env) ->
     ["#{'$terra_enum' => ", io_lib:format("~p", [list_to_atom(EnumName)]),
      ", tag => ", io_lib:format("~p", [list_to_atom(VariantName)]),
      case Entries of [] -> ""; _ -> [", ", lists:join(", ", Entries)] end, "}"];
+expression({pointer_new, Value}, Env) ->
+    ["terra_pointer_new(", expression(Value, Env), ")"];
+expression({pointer_read, Value}, Env) ->
+    ["terra_pointer_read(", expression(Value, Env), ")"];
 expression({var_ref, Name}, Env) ->
     case maps:find(Name, Env) of
         {ok, {direct, ErlangName}} -> ErlangName;
@@ -700,3 +724,54 @@ runtime_helpers() ->
     "terra_member(Value, members) when is_map(Value) -> maps:to_list(Value);\n"
     "terra_member(Value, Key) when is_map(Value) -> maps:get(Key, Value);\n"
     "terra_member(Value, Key) -> erlang:error({cannot_access_member, Key, Value}).\n".
+
+pointer_runtime_helpers() ->
+    "\nterra_region_start(Capacity) ->\n"
+    "    Ref = make_ref(),\n"
+    "    Key = {?MODULE, terra_region, Ref},\n"
+    "    erlang:put(Key, #{capacity => Capacity, next => 0, values => #{}}),\n"
+    "    erlang:put({?MODULE, terra_current_region}, Ref),\n"
+    "    Ref.\n\n"
+    "terra_region_cleanup(Ref) ->\n"
+    "    erlang:erase({?MODULE, terra_region, Ref}),\n"
+    "    case erlang:get({?MODULE, terra_current_region}) of\n"
+    "        Ref -> erlang:erase({?MODULE, terra_current_region});\n"
+    "        _ -> ok\n"
+    "    end,\n"
+    "    ok.\n\n"
+    "terra_pointer_new(Value) ->\n"
+    "    case erlang:get({?MODULE, terra_current_region}) of\n"
+    "        undefined -> erlang:error(terra_pointer_outside_region);\n"
+    "        Ref ->\n"
+    "            Key = {?MODULE, terra_region, Ref},\n"
+    "            Region = erlang:get(Key),\n"
+    "            Slot = maps:get(next, Region),\n"
+    "            terra_region_require_capacity(maps:get(capacity, Region), Slot),\n"
+    "            Values = maps:put(Slot, Value, maps:get(values, Region)),\n"
+    "            erlang:put(Key, Region#{next := Slot + 1, values := Values}),\n"
+    "            {terra_pointer, self(), Ref, Slot}\n"
+    "    end.\n\n"
+    "terra_region_require_capacity({auto, _Estimate}, _Slot) -> ok;\n"
+    "terra_region_require_capacity(Capacity, Slot) when Slot < Capacity -> ok;\n"
+    "terra_region_require_capacity(Capacity, _Slot) ->\n"
+    "    erlang:error({terra_temporary_region_full, Capacity}).\n\n"
+    "terra_pointer_read(Pointer) ->\n"
+    "    {_Key, Slot, Region} = terra_pointer_region(Pointer),\n"
+    "    case maps:find(Slot, maps:get(values, Region)) of\n"
+    "        {ok, Value} -> Value;\n"
+    "        error -> erlang:error(terra_dangling_pointer)\n"
+    "    end.\n\n"
+    "terra_pointer_write(Pointer, Value) ->\n"
+    "    {Key, Slot, Region} = terra_pointer_region(Pointer),\n"
+    "    Values = maps:put(Slot, Value, maps:get(values, Region)),\n"
+    "    erlang:put(Key, Region#{values := Values}),\n"
+    "    Value.\n\n"
+    "terra_pointer_region({terra_pointer, Owner, Ref, Slot}) when Owner == self() ->\n"
+    "    Key = {?MODULE, terra_region, Ref},\n"
+    "    case erlang:get(Key) of\n"
+    "        Region when is_map(Region) -> {Key, Slot, Region};\n"
+    "        _ -> erlang:error(terra_dangling_pointer)\n"
+    "    end;\n"
+    "terra_pointer_region({terra_pointer, _Owner, _Ref, _Slot}) ->\n"
+    "    erlang:error(terra_cross_process_pointer);\n"
+    "terra_pointer_region(_) -> erlang:error(terra_invalid_pointer).\n".

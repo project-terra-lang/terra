@@ -26,6 +26,7 @@ keyword(<<"let">>)    -> {ok, 'let'};
 keyword(<<"global">>) -> {ok, global};
 keyword(<<"local">>)  -> {ok, local};
 keyword(<<"temp">>)   -> {ok, temp};
+keyword(<<"region">>) -> {ok, region};
 keyword(<<"lazy">>)   -> {ok, lazy};
 keyword(<<"const">>)  -> {ok, const};
 keyword(<<"computed">>) -> {ok, computed};

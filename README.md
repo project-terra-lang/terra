@@ -1,266 +1,325 @@
-# A Simple Programming Language Project
-- [ ] (Concurrent Programming Langauge)
-- [ ] (Immutable State Machine, Support for Fake Mutability via a new mechanism)
-- [ ] (Turing Complete)
-- [ ] (Small Standard Library)
-- [ ] (An Imperative Programming Language that has features of erlang)
+# Terra
 
-** Just Make this a simple Language no need any complete features 
-** Its just a research project anyways
+Terra is a small research language with a Lua-like imperative syntax that
+transpiles to Erlang and runs on the BEAM. It is aimed at programs such as game
+servers and state machines, where immutable data and Erlang interoperability are
+useful without exposing all of Erlang's syntax.
 
-> ADD MORE FEATURES OVER TIME AS THIS IS A RESEARCH PROJECT <br>
-> This Language will be a transpiler (basically converting our source code to beam source files to be run in erlang runtime) <br>
-> Design the language in a way in which it will work nicely with the erlang ecosystem and that it has a nice imperative syntax for people to code there game servers
+The project is deliberately incremental. Terra is not intended to become a
+feature-complete general-purpose platform; each addition should remain small,
+understandable, and compatible with the Erlang ecosystem.
 
-0. Data Types
-```elixir
-Number (Super Data Type)
-    - Int
-    - SInt 
-    - Float
+## Project Status
 
-Atom
+- [ ] Concurrent programming language with process and message primitives
+- [x] Immutable-by-default state with temporary-region fake mutability
+- [x] Turing-complete core through conditionals, recursion, and unbounded integers
+- [ ] Small standard library
+- [x] Imperative source language that compiles to Erlang and runs on the BEAM
 
-Bool
+Unchecked items are active directions, not promises of a large framework. See
+[TODO.md](TODO.md) for the remaining milestones and [Progress.md](Progress.md)
+for completed work.
 
-Map
-RestrictedMap
-List
-Tuple
+## Quick Start
 
-String
+Terra requires Erlang/OTP with `erlc`, `erl`, and `escript` available on your
+`PATH`.
 
-User-defined structs and tagged enums
+```sh
+./build.sh --build
+./run.sh check examples/feature_showcase.terra
+./run.sh run examples/feature_showcase.terra hello from terra
 ```
 
-Integers use BEAM arbitrary-precision arithmetic, so integer operations do not
-overflow. `SInt` can accept ordinary integer values because it is a source-level
-signed intent, not a separate runtime range. Mixed numeric arithmetic promotes
-to `Float`, then `SInt`, then `Int`; same-type integer arithmetic preserves its
-type, and `/` always produces `Float`. Numeric constructors provide explicit
-conversions.
+Run the test suite with:
 
-1. Variables
-- All Variables are Immutable
-```lua
--- module-scope global variables
-global State state = State();
-
--- module-scope compile-time constants
-const Int max_players = 128;
-
--- local variables
-local Int x = 10;
-
--- temporary variables
-temp Var zss = Var();
+```sh
+./build.sh --test
 ```
 
-`global` values may be written at module scope, outside any function body. They
-are initialized successfully once and shared by all BEAM processes running the
-generated module. `const` values may also be written at module scope; because
-they are compile-time constants, they are resolved before globals and ordinary
-function bindings. All other variable declarations must be written inside a
-function or block scope. `thread_local` values initialize once per BEAM
-process. `atomic` stores `Int` or `SInt` values in a BEAM atomic cell, and
-`computed` reevaluates its expression whenever the binding is read.
+For a smaller example:
 
-`RestrictedMap(capacity, map)` creates an immutable map whose initial member
-count cannot exceed its non-negative integer capacity; `RestrictedMap(capacity)`
-creates an empty bounded map. Both `Map` and `RestrictedMap` expose `.count`
-for their member count and `.members` for a list of key/value tuples.
+```sh
+./run.sh run examples/counter.terra
+```
 
-Plain immutable data can be defined with a module-level struct and constructed
-positionally in field order:
-```lua
+## Program Shape
+
+Every executable Terra file has one fixed entry point:
+
+```terra
+function Number Main(String Args) {
+    stdout("hello from Terra");
+    return 0;
+}
+```
+
+`Main` must accept `String Args` and return `Number`. Terra has no `void` type,
+so every function returns a real value.
+
+## Types
+
+Terra currently supports:
+
+- Numbers: `Number`, `Int`, `SInt`, and `Float`
+- Scalars: `Atom` and `Bool`
+- Collections: `Map`, `RestrictedMap`, `List`, and `Tuple`
+- Strings: `String`
+- User data: `struct` and `enum`
+- Temporary-region pointers: `*Type`
+
+`Var` asks the compiler to infer a concrete type. `State` is reserved as a
+placeholder for future state-machine work.
+
+`Number` accepts integers and floats. `Int` represents non-negative integer
+intent, while `SInt` represents signed integer intent. Both use BEAM
+arbitrary-precision integers at runtime. Terra follows Erlang numeric semantics:
+`/` produces a float and `div` performs integer division.
+
+Terra has no `null`, `nil`, or `undefined` value. Model absence explicitly with
+an enum variant or an atom.
+
+## Immutable Variables
+
+Bindings cannot be reassigned after declaration.
+
+```terra
+const Int max_players = 64;
+global String region = "eu-west";
+
+function Number Main(String Args) {
+    local const Int retries = 3;
+    local computed Int attempts = retries + 1;
+    local lazy Number delayed = 42;
+    local atomic Int counter = 1;
+    local thread_local String session = "ready";
+    temp String message = session;
+    stdout(message);
+    return attempts;
+}
+```
+
+Declarations and evaluation modifiers include:
+
+- `const` and `global` at module scope
+- `local` and `temp` inside functions
+- `const`, `computed`, `lazy`, `atomic`, and `thread_local` on local bindings
+
+Function parameters and local bindings use lexical block scope.
+
+## Fake Mutability
+
+Terra pointers provide explicit fake mutability while ordinary values remain
+immutable. A pointer owns one slot in a process-local temporary region:
+
+```terra
+local *String name = "initial";
+name.* = "Terra";
+stdout(name.*);
+```
+
+Prefix `*` creates a pointer from an existing value. This copies the value into
+a new region slot; it does not expose a raw BEAM memory address:
+
+```terra
+local String original = "Ada";
+local *String name = *original;
+```
+
+Pointer types may be used in function parameters and returns, function
+arguments, struct fields, and enum payloads. Pointer allocation is allowed only
+for plain `local` declarations; `const`, `global`, and `temp` declarations stay
+immutable and cannot use pointer storage.
+
+Programs may set a fixed number of pointer slots with a first module-level
+declaration:
+
+```terra
+temp region(64);
+```
+
+Without that declaration, the compiler estimates the initial region size from
+the program's pointer-producing expressions and permits growth for repeated or
+recursive calls. A fixed region reports an error if its slot capacity is
+exceeded. The region exists for one `Main` execution and is always cleaned up
+after success or failure. Handles are tagged with their owner process and region;
+stale and cross-process pointers are rejected instead of being dereferenced.
+
+Run the complete pointer example with:
+
+```sh
+./run.sh run examples/fake_mutability.terra player-session
+```
+
+## Plain Data
+
+Struct declarations define named fields. Constructor arguments are positional
+and follow declaration order:
+
+```terra
 struct Player {
     String name;
     Int score;
 }
 
-local Player player = Player("Ada", 7);
+local Player player = Player("Ada", 10);
 stdout(player.name);
 ```
 
-Struct constructors and field access are statically checked. Struct values map
-directly to tagged BEAM maps and may be used in function parameters and returns.
+Enum payload constructors are declared explicitly with `variant`. They are not
+created magically by the compiler:
 
-Tagged enums model small state machines and result values:
-```lua
+```terra
 enum Result {
     variant Ok(Int value);
     variant Error(String message);
     variant Pending;
 }
 
-local Result result = Result.Ok(7);
-stdout(result.tag);  -- :Ok
+local Result result = Result.Ok(42);
 ```
 
-Each `variant` line is an explicit data-constructor declaration. For example,
-`variant Ok(Int value);` declares the tag `:Ok`, payload field `value`, and the
-constructor signature `Result.Ok(Int) -> Result`. Constructors only package
-immutable data; custom validation or other behavior belongs in an ordinary user
-function. Every enum value exposes its variant as the `.tag` Atom, and variant
-payloads use their declared field names.
+Structs and enum values compile to tagged Erlang maps, so generated values stay
+easy to inspect and exchange with Erlang code.
 
-Switches can match enum variants and bind payloads explicitly:
-```lua
+## Functions And Failure
+
+Functions declare parameter and return types. Multiple return values compile to
+an Erlang tuple:
+
+```terra
+function (Int, Int) divide(Int left, Int right) {
+    return left div right, left % right;
+}
+```
+
+Terra has three call forms:
+
+```terra
+local Int value = calculate();
+calculate;
+local Result attempted = try risky_call();
+```
+
+- A normal call returns the function's value.
+- A bare zero-argument function name invokes it successfully at most once per
+  generated module and BEAM process.
+- `try` invokes a user function with explicit failure propagation.
+
+The pipe operator passes the left value as the first argument of the call on the
+right:
+
+```terra
+local Int result = 5 |> add(3) |> multiply(2);
+```
+
+## Conditions And Matching
+
+Terra supports `if`, `elseif`, `else`, `unless`, and exhaustive switch
+expressions. A switch uses `if subject == { ... }` and ends with `case:`:
+
+```terra
+if score >= 100 {
+    stdout("high score");
+} elseif score >= 50 {
+    stdout("getting there");
+} else {
+    stdout("keep going");
+}
+
+if status == {
+    case "ready":
+        stdout("starting");
+    case:
+        stdout("waiting");
+}
+```
+
+Enum cases can bind their payload fields:
+
+```terra
 if result == {
     case Result.Ok(bind value):
-        return value;
+        stdout(value);
     case Result.Error(bind message):
         stdout(message);
-        return -1;
     case Result.Pending():
-        return 0;
+        stdout("pending");
     case:
-        return 0;
+        stdout("unknown result");
 }
 ```
 
-`bind name` creates an immutable binding scoped to that case. `_` ignores a
-payload field. Pattern matching is intentionally limited to enum cases where it
-replaces manual tag checks and unsafe payload access.
+Use `_` for an ignored enum payload. Function calls are valid in switch case
+expressions and inside case bodies.
 
-2. Functions
-- Functions support multiple Return Values
-- Functions support tail-call optimization
-- Functions must always declare a concrete return type and return a value.
-- Terra has no `void` functions.
-- `name();` invokes a function normally and can run it multiple times.
-- `try name();` invokes a user function with explicit failure propagation:
-  successful values are unchanged, while failures retain their BEAM reason and
-  Terra stack. Bare calls remain valid in language version 0.
-- `value |> Next(extra)` passes `value` as the first argument to `Next`, chains
-  left-to-right, and propagates failures with the same reason and Terra stack as
-  `try`.
-- `name;` invokes a zero-argument function successfully at most once per
-  generated module and BEAM process; `name()` always invokes normally.
-- Terra programs run through one fixed entry point:
-```lua
-function Number Main(String Args) {
-    return 0;
-}
+Comments use either `--` or `//`:
+
+```terra
+-- Lua-style comment
+// C-style line comment
 ```
 
-```lua
-function (Int, String)  x(){
-    return 69420, "nice";
-}
+## Collections And Loops
 
-function (Int, String) x(Int x) {
-    return x, "nice";
-}
+Maps support atom keys, string keys, dynamic keys, and member lookup:
+
+```terra
+local Map scores = #(:alice => 10, "bob" => 12);
+local Int alice = scores.alice;
 ```
 
-Multiple returned values can be assigned to typed local variables:
-```lua
-function (String, Number) T() {
-    return "", 69420;
-}
+Restricted maps add an immutable member-capacity limit:
 
-function Number Main(String Args) {
-    local String x, Number y = T();
-    return y;
-}
+```terra
+local RestrictedMap scores = RestrictedMap(3, #("alice" => 10));
 ```
 
-3. Condition Handling
-- Conditions must evaluate to `Bool`.
-- Conditions support unary `!`, comparison operators, and short-circuiting
-  `&&` / `||` boolean operators.
-- Switch cases break by default and must include a final default `case:`.
-```elixir
-# if..elseif..else
-if x < 69420 {
-    stdout("Hallo");
-} elseif x < 100 {
-    stdout('c');
-} else {
-    stdout(100);
+Loops include collection iteration, numeric ranges, `while`, and `do while`:
+
+```terra
+for_each name in names {
+    stdout(name);
 }
 
-# unless..else
-unless x < 69420 {
-    stdout("Hallo");
-} else {
-    stdout(100);
-}
-
-# switch statement
-# - break by default
-# - pattern matching
-# - exhaustive
-if x == {
-    case 69420:
-        stdout();
-
-    case:
-        whatever();
-}
-```
-
-4. Loops
-- `for_each` accepts `List`, `Tuple`, `Map`, `RestrictedMap`, and `String` values.
-- Loop conditions and bodies receive an implicit `it` counter variable.
-- Recursive calls use the normal function-call syntax and are type checked.
-```lua
-for_each x in y {
-    -- implicit variable called it is stored in every iterable sequence
-    stdout(x.it.whatever);
-}
-
-for range(10) {
+for range(5) {
     stdout(it);
 }
 
-while true {
-    stdout(it);
+while ready {
+    tick();
 }
 
-do_while true {
-    stdout(it)
+do_while ready {
+    tick();
 }
-``` 
-
-`stdout(...)` is the built-in console output operation. `print(...)` is left
-available for a future standard-library function.
-
-5. Developer Feedback
-- `terra check file.terra` reports a stable error code, a plain-language
-  explanation, and a suggested fix.
-- Diagnostic codes are lower-snake-case identifiers shown in brackets, such as
-  `[missing_return]`; tools may rely on the code even when wording changes.
-- Successful checks report non-failing warnings for unused variables,
-  unused parameters, shadowing, and ignored function return values.
-- `terra explain file.terra` prints a readable walkthrough of functions,
-  control flow, loops, calls, recursion, and returns.
-- `terra ast file.terra` remains available for inspecting the compiler AST.
-
-6. Erlang and BEAM Backend
-- `terra emit file.terra` writes generated Erlang source to `terra_build/`.
-- `terra build file.terra` generates Erlang and compiles a `.beam` module.
-- `terra run file.terra [args...]` builds the module and runs Terra `Main` on
-  the BEAM VM.
-- Generated BEAM debug metadata preserves Terra source paths and function
-  locations so runtime diagnostics show Terra code frames.
-- Repeated compilation of the same source path produces byte-identical Erlang
-  source and deterministic BEAM output.
-- `TERRA_BUILD_DIR` can override the default `terra_build/` output directory.
-- Terra multiple returns compile to Erlang tuples, immutable locals compile to
-  Erlang single-assignment variables, and calls returned directly from a
-  function compile through a constant-stack BEAM tail-call dispatch loop.
-
-Try the complete feature showcase:
-```bash
-./build.sh --build
-./run.sh explain examples/feature_showcase.terra
-./run.sh emit examples/feature_showcase.terra
-./run.sh run examples/feature_showcase.terra hello from terra
 ```
 
-Or run the smaller tail-recursive counter example:
-```bash
-./run.sh run examples/counter.terra
+Loops lower to recursive Erlang helper functions, preserving Terra's immutable
+binding model.
+
+## Compiler Commands
+
+After building, invoke the compiler through `./run.sh`:
+
+```text
+check <file>              Parse and type-check a Terra source file
+tokens <file>             Print tokenizer output
+ast <file>                Print the parsed abstract syntax tree
+explain <file>            Show inferred and declared program information
+emit <file> [output.erl]  Generate Erlang source
+build <file> [build-dir]  Generate and compile a BEAM module
+run <file> [args...]      Build and execute Main
+types                     List built-in Terra types
+version                   Print the compiler version
+help                      Show command help
 ```
+
+Generated Erlang and BEAM files are written to the build directory. Diagnostics
+include stable error codes, source locations, contextual labels, suggestions,
+and generated Erlang-to-Terra source mapping where available. Builds are
+deterministic for the same source and compiler version.
+
+The examples directory contains focused programs for structs, enums, maps,
+loops, diagnostics, recursion, and the larger feature showcase.

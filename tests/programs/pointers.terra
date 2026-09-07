@@ -1,0 +1,42 @@
+temp region(4);
+
+struct NameBox {
+    *String value;
+}
+
+enum NameResult {
+    variant Found(*String value);
+    variant Missing;
+}
+
+function Number Rename(*String value) {
+    value.* = "Terra";
+    return 1;
+}
+
+function String ReadName(*String value) {
+    return value.*;
+}
+
+function *String Identity(*String value) {
+    return value;
+}
+
+function Number Main(String Args) {
+    local *String name = "initial";
+    Rename(name);
+    local *String same_name = Identity(name);
+    local String copied_value = ReadName(same_name);
+    local *String copied = *copied_value;
+    local NameBox box = NameBox(copied);
+    local NameResult result = NameResult.Found(box.value);
+    if result == {
+        case NameResult.Found(bind found):
+            stdout(found.*);
+        case NameResult.Missing():
+            stdout("missing");
+        case:
+            stdout(Args);
+    }
+    return 7;
+}

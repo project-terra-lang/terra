@@ -18,6 +18,8 @@ main(_Args) ->
                test_records(OutDir),
                test_enums(OutDir),
                test_enum_pattern_ignore(OutDir),
+               test_pointers(OutDir), test_pointer_auto_region(OutDir),
+               test_pointer_region_overflow(OutDir),
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_source_map(OutDir),
@@ -389,6 +391,42 @@ test_enum_pattern_ignore(OutDir) ->
             expect("enum patterns can ignore payloads", true);
         Other ->
             io:format("not ok - enum patterns can ignore payloads~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_pointers(OutDir) ->
+    Path = "tests/programs/pointers.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_pointers, Source},
+         {ok, terra_pointers, 7, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("temporary-region pointers run and clean up",
+                   contains(Binary, <<"terra_region_start(4)">>) andalso
+                   contains(Binary, <<"terra_pointer_write(">>) andalso
+                   contains(Binary, <<"terra_pointer_read(">>) andalso
+                   erlang:get({terra_pointers, terra_current_region}) == undefined);
+        Other ->
+            io:format("not ok - temporary-region pointers run and clean up~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_pointer_region_overflow(OutDir) ->
+    Path = "tests/programs/pointer_region_overflow.terra",
+    Result = transpiler:run_file(Path, "", OutDir),
+    expect("fixed temporary region enforces capacity",
+           is_runtime_reason(Result, {terra_temporary_region_full, 1})).
+
+test_pointer_auto_region(OutDir) ->
+    Path = "tests/programs/pointer_auto_region.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_pointer_auto_region, Source},
+         {ok, terra_pointer_auto_region, 7, _BeamPath, _ErlangPath}} ->
+            expect("automatic temporary region uses compiler estimate",
+                   contains(iolist_to_binary(Source),
+                            <<"terra_region_start({auto, 1})">>));
+        Other ->
+            io:format("not ok - automatic temporary region~n  got: ~p~n", [Other]),
             fail
     end.
 

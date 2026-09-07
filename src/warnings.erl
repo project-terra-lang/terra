@@ -28,6 +28,8 @@ analyze_statement(#{kind := call, name := Name, args := Args}, State) ->
         true -> add_warning(ignored_return_value, #{callee => Name}, State1);
         false -> State1
     end;
+analyze_statement(#{kind := pointer_write, pointer := Pointer, value := Value}, State) ->
+    analyze_expr(Value, analyze_expr(Pointer, State));
 analyze_statement(#{kind := return, values := Values}, State) ->
     analyze_exprs(Values, State);
 analyze_statement(#{kind := 'if', branches := Branches, else_branch := Else}, State) ->

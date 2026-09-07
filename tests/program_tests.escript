@@ -129,6 +129,12 @@ main(_Args) ->
               fun expect_enum_pattern_duplicate_binding/1},
              {"enum pattern payload ignore", "tests/programs/enum_pattern_ignore.terra",
               fun(Result) -> element(1, Result) == ok end},
+             {"temporary-region pointers", "tests/programs/pointers.terra",
+              fun expect_pointers/1},
+             {"automatic pointer region", "tests/programs/pointer_auto_region.terra",
+              fun expect_auto_pointer_region/1},
+             {"temp pointer storage is rejected", "tests/programs/pointer_bad_temp.terra",
+              fun expect_bad_temp_pointer/1},
              {"try propagation expressions", "tests/programs/try_success.terra",
               fun expect_try_propagation/1},
              {"try requires function call", "tests/programs/try_invalid.terra",
@@ -477,6 +483,18 @@ expect_invalid_numeric_conversion(
     true;
 expect_invalid_numeric_conversion(_) ->
     false.
+
+expect_pointers({ok, Program}) ->
+    maps:get(region_capacity, Program) == {fixed, 4};
+expect_pointers(_) -> false.
+
+expect_auto_pointer_region({ok, Program}) ->
+    maps:get(region_capacity, Program) == {auto, 1};
+expect_auto_pointer_region(_) -> false.
+
+expect_bad_temp_pointer(
+  {error, {in_function, "Main", {invalid_pointer_storage, temp, runtime}}}) -> true;
+expect_bad_temp_pointer(_) -> false.
 
 expect_once_requires_zero_args(
   {error, {in_function, "Main",

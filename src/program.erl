@@ -50,14 +50,25 @@ run_passes([{Name, Pass} | Rest], Context) ->
     end.
 
 parsing_pass(#{legacy_tokens := Tokens} = Context) ->
-    case parse_module_items(Tokens, [], [], [], []) of
-        {ok, ModuleDeclarations, Records, Enums, Functions} ->
-            {ok, Context#{module_declaration_tokens => ModuleDeclarations,
-                          records => Records,
-                          enums => Enums,
-                          functions => Functions}};
+    case extract_region_config(Tokens) of
+        {ok, RegionConfig, RemainingTokens} ->
+            case parse_module_items(RemainingTokens, [], [], [], []) of
+                {ok, ModuleDeclarations, Records, Enums, Functions} ->
+                    {ok, Context#{module_declaration_tokens => ModuleDeclarations,
+                                  records => Records,
+                                  enums => Enums,
+                                  functions => Functions,
+                                  region_config => RegionConfig}};
+                Error -> Error
+            end;
         Error -> Error
     end.
+
+extract_region_config([{keyword, temp}, {keyword, region}, {lparen, "("},
+                       {int, Capacity}, {rparen, ")"}, {endofline, ";"} | Rest]) ->
+    {ok, {fixed, Capacity}, Rest};
+extract_region_config(Tokens) ->
+    {ok, auto, Tokens}.
 
 name_resolution_pass(#{records := Records, enums := Enums,
                        functions := Functions} = Context) ->
@@ -91,11 +102,16 @@ type_check_functions(Functions, Records, Enums, Signatures, Entry,
     case parse_bodies(Functions, Signatures, ModuleEnv, []) of
         {ok, Parsed} ->
             ParsedFunctions = lists:reverse(Parsed),
-            Program = #{kind => program, entry => Entry,
-                        records => Records,
-                        enums => Enums,
-                        module_declarations => ModuleDeclarations,
-                        functions => ParsedFunctions},
+            Program0 = #{kind => program, entry => Entry,
+                         records => Records,
+                         enums => Enums,
+                         module_declarations => ModuleDeclarations,
+                         functions => ParsedFunctions},
+            RegionCapacity = case maps:get(region_config, Context, auto) of
+                                 auto -> {auto, count_pointer_allocations(Program0)};
+                                 Fixed -> Fixed
+                             end,
+            Program = Program0#{region_capacity => RegionCapacity},
             case duplicate_global_name(Program) of
                 none ->
                     {ok, Context#{program => Program}};
@@ -239,6 +255,15 @@ parse_record_fields([{keyword, Type}, {id, Name}, {endofline, ";"} | Rest], Acc)
     end;
 parse_record_fields([{id, Type}, {id, Name}, {endofline, ";"} | Rest], Acc) ->
     parse_record_fields(Rest, [#{type => {named, Type}, name => Name} | Acc]);
+parse_record_fields([{times, "*"}, {keyword, Type}, {id, Name},
+                     {endofline, ";"} | Rest], Acc) ->
+    case is_type(Type) of
+        true -> parse_record_fields(Rest, [#{type => {pointer, Type}, name => Name} | Acc]);
+        false -> {error, {unknown_record_field_type, Type}}
+    end;
+parse_record_fields([{times, "*"}, {id, Type}, {id, Name},
+                     {endofline, ";"} | Rest], Acc) ->
+    parse_record_fields(Rest, [#{type => {pointer, {named, Type}}, name => Name} | Acc]);
 parse_record_fields([], _Acc) ->
     {error, unterminated_record_body};
 parse_record_fields(Other, _Acc) ->
@@ -312,6 +337,10 @@ parse_return_types([{id, Name}, {id, _FunctionName} | _] = Tokens) ->
     {ok, [{named, Name}], Rest};
 parse_return_types([{lparen, "("} | Rest]) ->
     parse_type_list(Rest, []);
+parse_return_types([{times, "*"}, {keyword, Type} | Rest]) ->
+    checked_type(Type, [{pointer, Type}], Rest, unknown_return_type);
+parse_return_types([{times, "*"}, {id, Name} | Rest]) ->
+    {ok, [{pointer, {named, Name}}], Rest};
 parse_return_types(Other) ->
     {error, {expected_return_type, Other}}.
 
@@ -326,6 +355,17 @@ parse_type_list([{id, Name}, {comma, ","} | Rest], Acc) ->
     parse_type_list(Rest, [{named, Name} | Acc]);
 parse_type_list([{id, Name}, {rparen, ")"} | Rest], Acc) ->
     {ok, lists:reverse([{named, Name} | Acc]), Rest};
+parse_type_list([{times, "*"}, {keyword, Type}, {comma, ","} | Rest], Acc) ->
+    case is_type(Type) of
+        true -> parse_type_list(Rest, [{pointer, Type} | Acc]);
+        false -> {error, {unknown_return_type, Type}}
+    end;
+parse_type_list([{times, "*"}, {keyword, Type}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([{pointer, Type} | Acc]), Rest};
+parse_type_list([{times, "*"}, {id, Name}, {comma, ","} | Rest], Acc) ->
+    parse_type_list(Rest, [{pointer, {named, Name}} | Acc]);
+parse_type_list([{times, "*"}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([{pointer, {named, Name}} | Acc]), Rest};
 parse_type_list(Other, _Acc) ->
     {error, {expected_return_type, Other}}.
 
@@ -358,6 +398,17 @@ parse_parameters([{id, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
     parse_parameters(Rest, [#{type => {named, Type}, name => Name} | Acc]);
 parse_parameters([{id, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
     {ok, lists:reverse([#{type => {named, Type}, name => Name} | Acc]), Rest};
+parse_parameters([{times, "*"}, {keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
+    case is_type(Type) of
+        true -> parse_parameters(Rest, [#{type => {pointer, Type}, name => Name} | Acc]);
+        false -> {error, {unknown_parameter_type, Type}}
+    end;
+parse_parameters([{times, "*"}, {keyword, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([#{type => {pointer, Type}, name => Name} | Acc]), Rest};
+parse_parameters([{times, "*"}, {id, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
+    parse_parameters(Rest, [#{type => {pointer, {named, Type}}, name => Name} | Acc]);
+parse_parameters([{times, "*"}, {id, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
+    {ok, lists:reverse([#{type => {pointer, {named, Type}}, name => Name} | Acc]), Rest};
 parse_parameters(Other, _Acc) ->
     {error, {expected_parameter, Other}}.
 
@@ -425,10 +476,15 @@ validate_declared_types(Records, Enums, Functions) ->
             [Type || F <- Functions,
                      Type <- maps:get(return_types, F) ++
                              [maps:get(type, P) || P <- maps:get(params, F)]],
-    case [Name || {named, Name} <- Types, not lists:member(Name, Names)] of
+    ReferencedNames = lists:append([named_type_names(Type) || Type <- Types]),
+    case [Name || Name <- ReferencedNames, not lists:member(Name, Names)] of
         [Name | _] -> {error, {unknown_user_type, Name}};
         [] -> ok
     end.
+
+named_type_names({named, Name}) -> [Name];
+named_type_names({pointer, Type}) -> named_type_names(Type);
+named_type_names(_Type) -> [].
 
 env_from_bindings(Bindings) ->
     [maps:from_list(Bindings)].
@@ -575,6 +631,9 @@ parse_module_declaration([{keyword, const}, {id, Type}, {id, Name},
 parse_module_declaration([{keyword, const}, {id, Name}, {equals, "="} | ValueTokens],
                          Signatures, Env) ->
     parse_declaration_value(const, const, var, Name, ValueTokens, Signatures, Env);
+parse_module_declaration([{keyword, Scope}, {times, "*"} | _], _Signatures, _Env)
+  when Scope == const; Scope == global ->
+    {error, {invalid_pointer_storage, Scope, runtime}};
 parse_module_declaration([{keyword, global}, {keyword, Type}, {id, Name},
                           {equals, "="} | ValueTokens], Signatures, Env) ->
     parse_module_global_value(runtime, Type, Name, ValueTokens, Signatures, Env);
@@ -648,6 +707,9 @@ env_bindings([]) ->
 
 parse_statements([], _F, _Sigs, Env, Acc) ->
     {ok, lists:reverse(Acc), Env};
+parse_statements([{id, Name}, {dot, "."}, {times, "*"}, {equals, "="} | Rest],
+                 F, Sigs, Env, Acc) ->
+    parse_pointer_write(Name, Rest, F, Sigs, Env, Acc);
 parse_statements([{id, Name}, {equals, "="} | _Rest], _F, _Sigs, Env, _Acc) ->
     case env_has(Name, Env) of
         true -> {error, {immutable_variable, Name}};
@@ -1149,11 +1211,30 @@ parse_scoped_declaration([{keyword, Scope}, {keyword, Type}, {id, Name},
 parse_scoped_declaration([{keyword, Scope}, {id, Type}, {id, Name},
                           {equals, "="} | ValueTokens], Sigs, Env) ->
     parse_declaration_value(Scope, runtime, {named, Type}, Name, ValueTokens, Sigs, Env);
+parse_scoped_declaration([{keyword, Scope}, {times, "*"}, {keyword, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Sigs, Env) ->
+    parse_pointer_declaration(Scope, runtime, Type, Name, ValueTokens, Sigs, Env);
+parse_scoped_declaration([{keyword, Scope}, {times, "*"}, {id, Type}, {id, Name},
+                          {equals, "="} | ValueTokens], Sigs, Env) ->
+    parse_pointer_declaration(Scope, runtime, {named, Type}, Name, ValueTokens, Sigs, Env);
 parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {keyword, Type},
                           {id, Name}, {equals, "="} | ValueTokens], Sigs, Env)
   when Modifier == lazy; Modifier == const; Modifier == computed;
        Modifier == atomic; Modifier == thread_local ->
     parse_declaration_value(Scope, Modifier, Type, Name, ValueTokens, Sigs, Env);
+parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {times, "*"},
+                          {keyword, Type}, {id, Name}, {equals, "="} | ValueTokens],
+                         Sigs, Env)
+  when Modifier == lazy; Modifier == const; Modifier == computed;
+       Modifier == atomic; Modifier == thread_local ->
+    parse_pointer_declaration(Scope, Modifier, Type, Name, ValueTokens, Sigs, Env);
+parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {times, "*"},
+                          {id, Type}, {id, Name}, {equals, "="} | ValueTokens],
+                         Sigs, Env)
+  when Modifier == lazy; Modifier == const; Modifier == computed;
+       Modifier == atomic; Modifier == thread_local ->
+    parse_pointer_declaration(Scope, Modifier, {named, Type}, Name,
+                              ValueTokens, Sigs, Env);
 parse_scoped_declaration([{keyword, Scope}, {lparen, "("} | Rest], Sigs, Env) ->
     case parse_parenthesized_bindings(Rest, []) of
         {ok, Bindings, [{equals, "="} | ValueTokens]} ->
@@ -1208,6 +1289,71 @@ parse_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, 
             end;
         {ok, _Value, Other} -> {error, {expected_endofline, Other}};
         Error -> Error
+    end.
+
+parse_pointer_declaration(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, Env) ->
+    case pointer_storage_allowed(Scope, Modifier) of
+        ok ->
+            case parse_expr(ValueTokens, Sigs, Env) of
+                {ok, Value, [{endofline, ";"}]} ->
+                    case single_type(Value, Sigs, Env) of
+                        {ok, {pointer, ActualPointee}} ->
+                            finish_pointer_declaration(Scope, Modifier, DeclaredType,
+                                                       ActualPointee, Name, Value, Sigs, Env);
+                        {ok, ActualType} ->
+                            finish_pointer_declaration(Scope, Modifier, DeclaredType,
+                                                       ActualType, Name,
+                                                       {pointer_new, Value}, Sigs, Env);
+                        Error -> Error
+                    end;
+                {ok, _Value, Other} -> {error, {expected_endofline, Other}};
+                Error -> Error
+            end;
+        Error -> Error
+    end.
+
+finish_pointer_declaration(Scope, Modifier, DeclaredType, ActualType, Name, Value,
+                           _Sigs, Env) ->
+    PointeeType = case DeclaredType of var -> ActualType; _ -> DeclaredType end,
+    case type_accepts(PointeeType, ActualType) of
+        true ->
+            PointerType = {pointer, PointeeType},
+            {ok, #{kind => variable, scope => Scope, eval => Modifier,
+                   type => PointerType, name => Name, value => Value,
+                   concurrency => shared},
+             env_put(Name, PointerType, Env)};
+        false -> {error, {pointer_type_mismatch, PointeeType, ActualType}}
+    end.
+
+pointer_storage_allowed(local, runtime) -> ok;
+pointer_storage_allowed(Scope, Modifier) ->
+    {error, {invalid_pointer_storage, Scope, Modifier}}.
+
+parse_pointer_write(Name, Tokens, F, Sigs, Env, Acc) ->
+    case env_find(Name, Env) of
+        {ok, {pointer, PointeeType}} ->
+            case parse_expr(Tokens, Sigs, Env) of
+                {ok, Value, [{endofline, ";"} | Remaining]} ->
+                    case single_type(Value, Sigs, Env) of
+                        {ok, ActualType} ->
+                            case type_accepts(PointeeType, ActualType) of
+                                true ->
+                                    Statement = #{kind => pointer_write,
+                                                  pointer => {var_ref, Name},
+                                                  value => Value},
+                                    parse_statements(Remaining, F, Sigs, Env,
+                                                     [Statement | Acc]);
+                                false ->
+                                    {error, {pointer_type_mismatch,
+                                             PointeeType, ActualType}}
+                            end;
+                        Error -> Error
+                    end;
+                {ok, _Value, Other} -> {error, {expected_endofline, Other}};
+                Error -> Error
+            end;
+        {ok, Type} -> {error, {dereference_non_pointer, Type}};
+        error -> {error, {unknown_variable, Name}}
     end.
 
 parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
@@ -1417,6 +1563,11 @@ parse_unary([{keyword, 'try'} | Rest], Sigs, Env) ->
         {ok, Value, _Remaining} -> {error, {try_requires_function_call, Value}};
         Error -> Error
     end;
+parse_unary([{times, "*"} | Rest], Sigs, Env) ->
+    case parse_unary(Rest, Sigs, Env) of
+        {ok, Value, Remaining} -> {ok, {pointer_new, Value}, Remaining};
+        Error -> Error
+    end;
 parse_unary(Tokens, Sigs, Env) ->
     parse_primary(Tokens, Sigs, Env).
 
@@ -1448,6 +1599,8 @@ parse_primary(Other, _Sigs, _Env) -> {error, {expected_expression, Other}}.
 
 parse_members(Value, [{dot, "."}, {id, Name} | Rest]) ->
     parse_members({member, Value, Name}, Rest);
+parse_members(Value, [{dot, "."}, {times, "*"} | Rest]) ->
+    parse_members({pointer_read, Value}, Rest);
 parse_members(Value, Rest) ->
     {ok, Value, Rest}.
 
@@ -1658,6 +1811,17 @@ infer_types({tuple, _}, _Sigs, _Env) -> {ok, [tuple]};
 infer_types({map, _}, _Sigs, _Env) -> {ok, [map]};
 infer_types({record, Name, _Fields}, _Sigs, _Env) -> {ok, [{named, Name}]};
 infer_types({variant, Name, _Variant, _Fields}, _Sigs, _Env) -> {ok, [{named, Name}]};
+infer_types({pointer_new, Value}, Sigs, Env) ->
+    case single_type(Value, Sigs, Env) of
+        {ok, Type} -> {ok, [{pointer, Type}]};
+        Error -> Error
+    end;
+infer_types({pointer_read, Value}, Sigs, Env) ->
+    case single_type(Value, Sigs, Env) of
+        {ok, {pointer, Type}} -> {ok, [Type]};
+        {ok, Type} -> {error, {dereference_non_pointer, Type}};
+        Error -> Error
+    end;
 infer_types({member, Value, Name}, Sigs, Env) ->
     case single_type(Value, Sigs, Env) of
         {ok, Type} when (Type == map orelse Type == restricted_map), Name == "count" ->
@@ -1788,12 +1952,24 @@ type_accepts(number, int) -> true;
 type_accepts(number, sint) -> true;
 type_accepts(number, float) -> true;
 type_accepts(sint, int) -> true;
+type_accepts({pointer, Expected}, {pointer, Actual}) ->
+    type_accepts(Expected, Actual);
 type_accepts(Type, Type) -> true;
 type_accepts(_, _) -> false.
 
 is_type(state) -> true;
 is_type(var) -> true;
 is_type(Type) -> datatypes:is_type(Type).
+
+count_pointer_allocations({pointer_new, Value}) ->
+    1 + count_pointer_allocations(Value);
+count_pointer_allocations(Value) when is_map(Value) ->
+    lists:sum([count_pointer_allocations(Child) || Child <- maps:values(Value)]);
+count_pointer_allocations(Value) when is_list(Value) ->
+    lists:sum([count_pointer_allocations(Child) || Child <- Value]);
+count_pointer_allocations(Value) when is_tuple(Value) ->
+    lists:sum([count_pointer_allocations(Child) || Child <- tuple_to_list(Value)]);
+count_pointer_allocations(_Value) -> 0.
 
 add_ast_spans(Value, Span) when is_list(Value) ->
     [add_ast_spans(Item, Span) || Item <- Value];
