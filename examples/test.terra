@@ -1,0 +1,22 @@
+-- temp region(2); // will fail the compiler as the slots will get full due to having more than 2 pointers
+
+
+
+function Number Main(String Args) {
+    local *String name = "";
+    local *String age = name;
+    local *String g2 = "test";
+
+    stdout(name);
+    stdout(name.*);
+
+    stdout(g2);
+    stdout(g2.*);
+
+    g2.* = "allocater";
+    
+    stdout(*g2);
+    stdout(g2.*);
+
+    return 0;
+}
