@@ -1,5 +1,7 @@
 export Add;
 export Label;
+export Pair;
+export Increment;
 
 function Int Add(Int left, Int right) {
     return left + right;
@@ -7,6 +9,16 @@ function Int Add(Int left, Int right) {
 
 function String Label(String value) {
     return value;
+}
+
+function (String, Int) Pair(String label, Int value) {
+    return label, value;
+}
+
+function Int Increment(Int value) {
+    local *Int slot = value;
+    slot.* = slot.* + 1;
+    return slot.*;
 }
 
 function Int Hidden(Int value) {

@@ -138,6 +138,7 @@ generate_module(Module, #{functions := Functions} = Program) ->
      "-export([", export_entries(Program), "]).\n\n",
      source_attribute(SourcePath, MainLine),
      main_wrapper(maps:get(entry, Program, none), RegionCapacity, UsesPointers),
+     export_wrappers(Program, SourcePath, RegionCapacity, UsesPointers),
      [generate_function(Function#{module_declarations => ModuleDeclarations}, SourcePath)
      || Function <- Functions],
      "-file(\"terra_runtime\", 1).\n",
@@ -153,15 +154,58 @@ export_entries(#{entry := Entry, exports := Exports, functions := Functions}) ->
                       _ -> ["main/1"]
                   end,
     FunctionExports =
-        [export_entry(Name, Functions) || #{name := Name} <- Exports],
+        lists:append([[internal_export_entry(Name, Functions),
+                       export_entry(Name, Functions)]
+                      || #{name := Name} <- Exports]),
     lists:join(", ", MainExports ++ FunctionExports).
 
-export_entry(Name, Functions) ->
+internal_export_entry(Name, Functions) ->
     case [length(maps:get(params, Function)) || Function <- Functions,
                                          maps:get(name, Function) == Name] of
         [Arity] -> [function_name(Name), "/", integer_to_list(Arity)];
         [] -> throw({backend_error, {unknown_export, Name}})
     end.
+
+export_entry(Name, Functions) ->
+    case [length(maps:get(params, Function)) || Function <- Functions,
+                                         maps:get(name, Function) == Name] of
+        [Arity] -> [erlang_atom(Name), "/", integer_to_list(Arity)];
+        [] -> throw({backend_error, {unknown_export, Name}})
+    end.
+
+export_wrappers(#{exports := Exports, functions := Functions}, SourcePath,
+                RegionCapacity, UsesPointers) ->
+    [export_wrapper(Name, Functions, SourcePath, RegionCapacity, UsesPointers)
+     || #{name := Name} <- Exports].
+
+export_wrapper(Name, Functions, SourcePath, RegionCapacity, UsesPointers) ->
+    [Function] = [Candidate || Candidate <- Functions,
+                               maps:get(name, Candidate) == Name],
+    Params = maps:get(params, Function),
+    Args = ["TerraExportArg" ++ integer_to_list(Index)
+            || Index <- lists:seq(1, length(Params))],
+    CheckedArgs =
+        [["terra_export_argument(", ffi_type_spec(maps:get(type, Param)), ", ",
+          erlang_atom(Name), ", ", integer_to_list(Index), ", ", Arg, ")"]
+         || {Param, Arg, Index} <- zip_with_index(Params, Args, 1, [])],
+    Call = ["terra_export_return(", ffi_return_spec(maps:get(return_types, Function)),
+            ", ", erlang_atom(Name), ", ", function_name(Name), "(",
+            lists:join(", ", CheckedArgs), "))"],
+    Body = case UsesPointers of
+               true ->
+                   ["    TerraRegion = terra_region_start(",
+                    region_capacity(RegionCapacity), "),\n",
+                    "    try ", Call,
+                    "\n    after terra_region_cleanup(TerraRegion) end"];
+               false -> ["    ", Call]
+           end,
+    [source_attribute(SourcePath, maps:get(source_line, Function, 1)),
+     erlang_atom(Name), "(", lists:join(", ", Args), ") ->\n",
+     Body, ".\n\n"].
+
+zip_with_index([], [], _Index, Acc) -> lists:reverse(Acc);
+zip_with_index([Value | Values], [Arg | Args], Index, Acc) ->
+    zip_with_index(Values, Args, Index + 1, [{Value, Arg, Index} | Acc]).
 
 main_wrapper(none, _Capacity, _UsesPointers) ->
     "";
@@ -351,9 +395,11 @@ generate_statement(#{kind := call, name := stdout, args := Args},
     {[indent(Level), "terra_stdout([", lists:join(", ", Values), "])"],
      Env, Counter};
 generate_statement(#{kind := ffi_call, module := ModuleName,
-                     function := FunctionName, args := Args},
+                     function := FunctionName, args := Args,
+                     return_types := Returns},
                    Env, Counter, Level, _FunctionName) ->
-    {[indent(Level), expression({ffi_call, ModuleName, FunctionName, Args}, Env)],
+    Call = {ffi_call, ModuleName, FunctionName, Args, Returns},
+    {[indent(Level), expression(Call, Env)],
      Env, Counter};
 generate_statement(#{kind := pointer_write, pointer := Pointer, value := Value},
                    Env, Counter, Level, _FunctionName) ->
@@ -626,9 +672,11 @@ expression({pipe_call, Left, Name, Args}, Env) ->
 expression({remote_call, ModuleName, FunctionName, Args}, Env) ->
     [remote_module_name(ModuleName), ":", function_name(FunctionName), "(",
      lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
-expression({ffi_call, ModuleName, FunctionName, Args}, Env) ->
-    [erlang_atom(ModuleName), ":", erlang_atom(FunctionName), "(",
-     lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
+expression({ffi_call, ModuleName, FunctionName, Args, Returns}, Env) ->
+    ["terra_ffi_return(", ffi_return_spec(Returns), ", ",
+     erlang_atom(ModuleName), ", ", erlang_atom(FunctionName), ", ",
+     erlang_atom(ModuleName), ":", erlang_atom(FunctionName), "(",
+     lists:join(", ", [expression(Arg, Env) || Arg <- Args]), "))"];
 expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
 
 update_entry({{field, Name}, Value}, Env) ->
@@ -683,6 +731,13 @@ remote_module_name(Name) ->
 
 erlang_atom(Name) ->
     io_lib:format("~p", [list_to_atom(Name)]).
+
+ffi_return_spec([Type]) -> ffi_type_spec(Type);
+ffi_return_spec(Types) ->
+    ["{multiple, [", lists:join(", ", [ffi_type_spec(Type) || Type <- Types]), "]}"].
+
+ffi_type_spec({named, Name}) -> ["{named, ", erlang_atom(Name), "}"];
+ffi_type_spec(Type) -> io_lib:format("~p", [Type]).
 
 return_expression([Value], Env) -> expression(Value, Env);
 return_expression(Values, Env) ->
@@ -747,6 +802,42 @@ indent(Level) -> lists:duplicate(Level * 4, $\s).
 runtime_helpers() ->
     "terra_args(Value) when is_binary(Value) -> Value;\n"
     "terra_args(Value) -> unicode:characters_to_binary(Value).\n\n"
+    "terra_ffi_return(Expected, Module, Function, Value) ->\n"
+    "    case terra_ffi_valid(Expected, Value) of\n"
+    "        true -> Value;\n"
+    "        false -> erlang:error({invalid_erlang_return, Module, Function, Expected, Value})\n"
+    "    end.\n\n"
+    "terra_ffi_valid(number, Value) -> is_number(Value);\n"
+    "terra_ffi_valid(int, Value) -> is_integer(Value) andalso Value >= 0;\n"
+    "terra_ffi_valid(sint, Value) -> is_integer(Value);\n"
+    "terra_ffi_valid(float, Value) -> is_float(Value);\n"
+    "terra_ffi_valid(atom, Value) -> is_atom(Value);\n"
+    "terra_ffi_valid(bool, Value) -> Value =:= true orelse Value =:= false;\n"
+    "terra_ffi_valid(string, Value) -> is_binary(Value);\n"
+    "terra_ffi_valid(list, Value) -> is_list(Value);\n"
+    "terra_ffi_valid(tuple, Value) -> is_tuple(Value);\n"
+    "terra_ffi_valid(map, Value) -> is_map(Value);\n"
+    "terra_ffi_valid(restricted_map, {terra_restricted_map, Capacity, Value}) ->\n"
+    "    is_integer(Capacity) andalso Capacity >= 0 andalso is_map(Value)\n"
+    "        andalso map_size(Value) =< Capacity;\n"
+    "terra_ffi_valid({named, Name}, #{'$terra_struct' := Name}) -> true;\n"
+    "terra_ffi_valid({named, Name}, #{'$terra_enum' := Name}) -> true;\n"
+    "terra_ffi_valid({multiple, Types}, Value) when is_tuple(Value) ->\n"
+    "    Values = tuple_to_list(Value),\n"
+    "    length(Types) =:= length(Values) andalso\n"
+    "        lists:all(fun({Type, Item}) -> terra_ffi_valid(Type, Item) end,\n"
+    "                  lists:zip(Types, Values));\n"
+    "terra_ffi_valid(_Expected, _Value) -> false.\n\n"
+    "terra_export_argument(Expected, Function, Position, Value) ->\n"
+    "    case terra_ffi_valid(Expected, Value) of\n"
+    "        true -> Value;\n"
+    "        false -> erlang:error({invalid_erlang_argument, Function, Position, Expected, Value})\n"
+    "    end.\n\n"
+    "terra_export_return(Expected, Function, Value) ->\n"
+    "    case terra_ffi_valid(Expected, Value) of\n"
+    "        true -> Value;\n"
+    "        false -> erlang:error({invalid_terra_export_return, Function, Expected, Value})\n"
+    "    end.\n\n"
     "terra_stdout([]) -> io:nl();\n"
     "terra_stdout(Values) ->\n"
     "    lists:foreach(fun terra_stdout_value/1, Values),\n"

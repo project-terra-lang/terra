@@ -622,10 +622,21 @@ validate_exports(Exports, Functions) ->
             Names = [maps:get(name, Function) || Function <- Functions],
             case [maps:get(name, Export) || Export <- Exports,
                   not lists:member(maps:get(name, Export), Names)] of
-                [] -> ok;
+                [] -> validate_export_types(Exports, Functions);
                 [Name | _] -> {error, {unknown_export, Name}}
             end;
         Name -> {error, {duplicate_export, Name}}
+    end.
+
+validate_export_types([], _Functions) -> ok;
+validate_export_types([#{name := Name} | Rest], Functions) ->
+    [Function] = [Candidate || Candidate <- Functions,
+                               maps:get(name, Candidate) == Name],
+    Types = maps:get(return_types, Function) ++
+            [maps:get(type, Param) || Param <- maps:get(params, Function)],
+    case [Type || Type <- Types, not ffi_type_allowed(Type)] of
+        [] -> validate_export_types(Rest, Functions);
+        [Type | _] -> {error, {invalid_erlang_export_type, Name, Type}}
     end.
 
 signatures(Functions, Records, Enums, ImportSignatures, Externals) ->
@@ -648,13 +659,32 @@ signatures(Functions, Records, Enums, ImportSignatures, Externals) ->
                    ImportSignatures ++ ExternalSignatures).
 
 validate_externals(Externals) ->
-    Keys = [{maps:get(module, External), maps:get(function, External)}
-            || External <- Externals],
-    case first_duplicate(Keys, []) of
-        none -> ok;
-        {ModuleName, FunctionName} ->
-            {error, {duplicate_erlang_external, ModuleName, FunctionName}}
+    case first_invalid_external_type(Externals) of
+        none ->
+            Keys = [{maps:get(module, External), maps:get(function, External)}
+                    || External <- Externals],
+            case first_duplicate(Keys, []) of
+                none -> ok;
+                {ModuleName, FunctionName} ->
+                    {error, {duplicate_erlang_external, ModuleName, FunctionName}}
+            end;
+        Type -> {error, {invalid_erlang_ffi_type, Type}}
     end.
+
+first_invalid_external_type([]) -> none;
+first_invalid_external_type([External | Rest]) ->
+    Types = maps:get(return_types, External) ++
+            [maps:get(type, Param) || Param <- maps:get(params, External)],
+    case [Type || Type <- Types, not ffi_type_allowed(Type)] of
+        [] -> first_invalid_external_type(Rest);
+        [Type | _] -> Type
+    end.
+
+ffi_type_allowed({pointer, _Type}) -> false;
+ffi_type_allowed(state) -> false;
+ffi_type_allowed(var) -> false;
+ffi_type_allowed({named, _Name}) -> true;
+ffi_type_allowed(Type) -> datatypes:is_type(Type).
 
 first_duplicate([], _Seen) -> none;
 first_duplicate([Value | Rest], Seen) ->
@@ -1006,10 +1036,11 @@ parse_statements([{keyword, return} | Rest], F, Sigs, Env, Acc) ->
 parse_statements([{id, "erlang"}, {dot, "."}, {id, ModuleName}, {dot, "."},
                   {id, FunctionName}, {lparen, "("} | Rest], F, Sigs, Env, Acc) ->
     case parse_ffi_call(ModuleName, FunctionName, Rest, Sigs, Env) of
-        {ok, {ffi_call, ModuleName, FunctionName, Args},
+        {ok, {ffi_call, ModuleName, FunctionName, Args, Returns},
          [{endofline, ";"} | Remaining]} ->
             Statement = #{kind => ffi_call, module => ModuleName,
-                          function => FunctionName, args => Args},
+                          function => FunctionName, args => Args,
+                          return_types => Returns},
             parse_statements(Remaining, F, Sigs, Env, [Statement | Acc]);
         {ok, _Call, Other} -> {error, {expected_endofline, Other}};
         Error -> Error
@@ -2059,14 +2090,16 @@ parse_remote_call(ModuleName, FunctionName, Tokens, Sigs, Env) ->
 
 parse_ffi_call(ModuleName, FunctionName, [{rparen, ")"} | Rest], Sigs, Env) ->
     case validate_call({ffi, ModuleName, FunctionName}, [], Sigs, Env) of
-        {ok, _} -> {ok, {ffi_call, ModuleName, FunctionName, []}, Rest};
+        {ok, Returns} ->
+            {ok, {ffi_call, ModuleName, FunctionName, [], Returns}, Rest};
         Error -> Error
     end;
 parse_ffi_call(ModuleName, FunctionName, Tokens, Sigs, Env) ->
     case parse_sequence(Tokens, rparen, call_args, [], Sigs, Env) of
         {ok, {call_args, Args}, Rest} ->
             case validate_call({ffi, ModuleName, FunctionName}, Args, Sigs, Env) of
-                {ok, _} -> {ok, {ffi_call, ModuleName, FunctionName, Args}, Rest};
+                {ok, Returns} ->
+                    {ok, {ffi_call, ModuleName, FunctionName, Args, Returns}, Rest};
                 Error -> Error
             end;
         Error -> Error
@@ -2386,7 +2419,7 @@ infer_types({pipe_call, Left, Name, Args}, Sigs, Env) ->
     validate_call(Name, [Left | Args], Sigs, Env);
 infer_types({remote_call, ModuleName, FunctionName, Args}, Sigs, Env) ->
     validate_call({remote, ModuleName, FunctionName}, Args, Sigs, Env);
-infer_types({ffi_call, ModuleName, FunctionName, Args}, Sigs, Env) ->
+infer_types({ffi_call, ModuleName, FunctionName, Args, _Returns}, Sigs, Env) ->
     validate_call({ffi, ModuleName, FunctionName}, Args, Sigs, Env);
 infer_types({call, Name, Args}, Sigs, Env) -> validate_call(Name, Args, Sigs, Env);
 infer_types({binary, Op, Left, Right}, Sigs, Env) ->

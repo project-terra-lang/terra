@@ -1,0 +1,42 @@
+struct Player {
+    String name;
+}
+
+enum Result {
+    variant Ready;
+}
+
+extern Bool erlang.erlang.is_binary(String value);
+extern Bool erlang.erlang.is_boolean(Bool value);
+extern Bool erlang.erlang.is_atom(Atom value);
+extern Bool erlang.erlang.is_number(Number value);
+extern Bool erlang.erlang.is_list(List value);
+extern Bool erlang.erlang.is_tuple(Tuple value);
+extern Bool erlang.erlang.is_map(Map value);
+extern String erlang.maps.get(Atom key, Player value);
+extern Atom erlang.erlang.map_get(Atom key, Result value);
+extern Atom erlang.erlang.element(Int index, RestrictedMap value);
+extern (String, String) erlang.erlang.split_binary(String value, Int position);
+
+function Number Main(String Args) {
+    local Player player = Player("Ada");
+    local Result result = Result.Ready();
+    local RestrictedMap limited = RestrictedMap(2, #(:ready => true));
+    local String left, String right = erlang.erlang.split_binary("Terra", 2);
+
+    if erlang.erlang.is_binary("Terra") &&
+       erlang.erlang.is_boolean(true) &&
+       erlang.erlang.is_atom(:ready) &&
+       erlang.erlang.is_number(3) &&
+       erlang.erlang.is_list([1, 2]) &&
+       erlang.erlang.is_tuple((1, "two")) &&
+       erlang.erlang.is_map(#(:ready => true)) &&
+       erlang.maps.get(:name, player) == "Ada" &&
+       erlang.erlang.map_get(:tag, result) == :Ready &&
+       erlang.erlang.element(1, limited) == :terra_restricted_map &&
+       left == "Te" && right == "rra" {
+        return 1;
+    } else {
+        return 0;
+    }
+}

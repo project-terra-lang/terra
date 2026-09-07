@@ -1,0 +1,6 @@
+extern String erlang.lists.sum(List values);
+
+function Number Main(String Args) {
+    local String invalid = erlang.lists.sum([1, 2, 3]);
+    return 0;
+}

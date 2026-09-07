@@ -212,6 +212,15 @@ format({undeclared_erlang_function, ModuleName, FunctionName}) ->
      io_lib:format("Erlang function ~s:~s has not been selected.",
                    [ModuleName, FunctionName]),
      "Add an exact extern signature for this function before calling it."};
+format({invalid_erlang_ffi_type, Type}) ->
+    {invalid_erlang_ffi_type,
+     io_lib:format("~s cannot cross the Erlang FFI boundary.", [type_name(Type)]),
+     "Use a concrete value type; pointers, Var, and State are process/compiler-local."};
+format({invalid_erlang_export_type, Name, Type}) ->
+    {invalid_erlang_export_type,
+     io_lib:format("Exported function ~s uses boundary-unsafe type ~s.",
+                   [Name, type_name(Type)]),
+     "Use concrete Erlang-mapped parameters and returns for exported functions."};
 format({function_call_required, Name}) ->
     {function_call_required,
      io_lib:format("~s names a user-defined type, not a function.", [name(Name)]),

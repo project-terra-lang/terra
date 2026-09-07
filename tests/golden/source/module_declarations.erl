@@ -21,6 +21,46 @@ terra_fn_main(Terra_Args_1) ->
 terra_args(Value) when is_binary(Value) -> Value;
 terra_args(Value) -> unicode:characters_to_binary(Value).
 
+terra_ffi_return(Expected, Module, Function, Value) ->
+    case terra_ffi_valid(Expected, Value) of
+        true -> Value;
+        false -> erlang:error({invalid_erlang_return, Module, Function, Expected, Value})
+    end.
+
+terra_ffi_valid(number, Value) -> is_number(Value);
+terra_ffi_valid(int, Value) -> is_integer(Value) andalso Value >= 0;
+terra_ffi_valid(sint, Value) -> is_integer(Value);
+terra_ffi_valid(float, Value) -> is_float(Value);
+terra_ffi_valid(atom, Value) -> is_atom(Value);
+terra_ffi_valid(bool, Value) -> Value =:= true orelse Value =:= false;
+terra_ffi_valid(string, Value) -> is_binary(Value);
+terra_ffi_valid(list, Value) -> is_list(Value);
+terra_ffi_valid(tuple, Value) -> is_tuple(Value);
+terra_ffi_valid(map, Value) -> is_map(Value);
+terra_ffi_valid(restricted_map, {terra_restricted_map, Capacity, Value}) ->
+    is_integer(Capacity) andalso Capacity >= 0 andalso is_map(Value)
+        andalso map_size(Value) =< Capacity;
+terra_ffi_valid({named, Name}, #{'$terra_struct' := Name}) -> true;
+terra_ffi_valid({named, Name}, #{'$terra_enum' := Name}) -> true;
+terra_ffi_valid({multiple, Types}, Value) when is_tuple(Value) ->
+    Values = tuple_to_list(Value),
+    length(Types) =:= length(Values) andalso
+        lists:all(fun({Type, Item}) -> terra_ffi_valid(Type, Item) end,
+                  lists:zip(Types, Values));
+terra_ffi_valid(_Expected, _Value) -> false.
+
+terra_export_argument(Expected, Function, Position, Value) ->
+    case terra_ffi_valid(Expected, Value) of
+        true -> Value;
+        false -> erlang:error({invalid_erlang_argument, Function, Position, Expected, Value})
+    end.
+
+terra_export_return(Expected, Function, Value) ->
+    case terra_ffi_valid(Expected, Value) of
+        true -> Value;
+        false -> erlang:error({invalid_terra_export_return, Function, Expected, Value})
+    end.
+
 terra_stdout([]) -> io:nl();
 terra_stdout(Values) ->
     lists:foreach(fun terra_stdout_value/1, Values),

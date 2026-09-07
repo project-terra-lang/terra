@@ -1,0 +1,9 @@
+export Echo;
+
+function *Int Echo(*Int value) {
+    return value;
+}
+
+function Number Main(String Args) {
+    return 0;
+}

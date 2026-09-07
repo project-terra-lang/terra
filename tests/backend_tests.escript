@@ -26,6 +26,8 @@ main(_Args) ->
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_imports_exports(OutDir),
                test_erlang_ffi(OutDir),
+               test_erlang_term_mapping(OutDir),
+               test_erlang_return_validation(OutDir),
                test_source_map(OutDir),
                test_showcase_run(OutDir), test_counter_example(OutDir)],
     case lists:member(fail, Results) of
@@ -521,12 +523,33 @@ test_imports_exports(OutDir) ->
          {ok, terra_imports_exports, 5, _BeamPath, _ErlangPath}} ->
             Binary = iolist_to_binary(Source),
             LibBeam = filename:join(OutDir, "terra_math_lib.beam"),
+            LibSource = filename:join(OutDir, "terra_math_lib.erl"),
+            {ok, LibSourceBinary} = file:read_file(LibSource),
+            ErlangAdd = apply(terra_math_lib, 'Add', [4, 5]),
+            ErlangLabel = apply(terra_math_lib, 'Label', [<<"ready">>]),
+            ErlangPair = apply(terra_math_lib, 'Pair', [<<"score">>, 7]),
+            ErlangIncrement = apply(terra_math_lib, 'Increment', [7]),
+            BadArgument = erlang_export_error(
+                            fun() -> apply(terra_math_lib, 'Add', [<<"bad">>, 5]) end),
             expect("module imports and exports",
                    contains(Binary, <<"terra_math_lib:terra_fn_add">>) andalso
-                   filelib:is_file(LibBeam));
+                   contains(LibSourceBinary, <<"'Add'/2">>) andalso
+                   filelib:is_file(LibBeam) andalso
+                   ErlangAdd == 9 andalso ErlangLabel == <<"ready">> andalso
+                   ErlangPair == {<<"score">>, 7} andalso
+                   ErlangIncrement == 8 andalso
+                   BadArgument ==
+                       {invalid_erlang_argument, 'Add', 1, int, <<"bad">>});
         Other ->
             io:format("not ok - module imports and exports~n  got: ~p~n", [Other]),
             fail
+    end.
+
+erlang_export_error(Fun) ->
+    try Fun() of
+        _Value -> no_error
+    catch
+        error:Reason -> Reason
     end.
 
 test_erlang_ffi(OutDir) ->
@@ -535,9 +558,34 @@ test_erlang_ffi(OutDir) ->
         {{ok, terra_erlang_ffi, Source},
          {ok, terra_erlang_ffi, 6, _BeamPath, _ErlangPath}} ->
             expect("selected Erlang FFI call",
-                   contains(iolist_to_binary(Source), <<"lists:sum(">>));
+                   contains(iolist_to_binary(Source),
+                            <<"terra_ffi_return(number, lists, sum, lists:sum(">>));
         Other ->
             io:format("not ok - selected Erlang FFI call~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_erlang_term_mapping(OutDir) ->
+    Path = "tests/programs/erlang_term_mapping.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_erlang_term_mapping, 1, _BeamPath, _ErlangPath} ->
+            expect("Terra values map predictably to Erlang terms", true);
+        Other ->
+            io:format("not ok - Terra values map predictably to Erlang terms~n"
+                      "  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_erlang_return_validation(OutDir) ->
+    Path = "tests/programs/erlang_ffi_bad_return.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {error, {runtime_error, error,
+                 {invalid_erlang_return, lists, sum, string, 6}, Stacktrace}} ->
+            expect("Erlang FFI validates declared return types",
+                   has_terra_frame(Stacktrace, Path));
+        Other ->
+            io:format("not ok - Erlang FFI validates declared return types~n"
+                      "  got: ~p~n", [Other]),
             fail
     end.
 

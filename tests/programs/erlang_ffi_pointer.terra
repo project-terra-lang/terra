@@ -1,0 +1,5 @@
+extern *Int erlang.erlang.hd(List values);
+
+function Number Main(String Args) {
+    return 0;
+}

@@ -49,6 +49,24 @@ Only exported functions are visible through qualified calls such as
 `math_lib.Add(...)`. Structs, enums, globals, and constants remain local to the
 source file in this version.
 
+An `export Name;` declaration also emits a public Erlang wrapper. The generated
+module name is `terra_` followed by the lowercase source-file base name, while
+the function name is preserved as an exact Erlang atom. For `math_lib.terra`:
+
+```erlang
+terra_math_lib:'Add'(2, 3).
+```
+
+The wrapper validates each argument before entering Terra and validates the
+result before returning it to Erlang. Invalid arguments raise
+`{invalid_erlang_argument, Function, Position, ExpectedType, Value}`; an
+unexpected internal result raises
+`{invalid_terra_export_return, Function, ExpectedType, Value}`. Multiple Terra
+returns become one tuple. Exported signatures may use every mapped concrete
+type listed below, but not pointers, `Var`, or `State`. If the implementation
+uses temporary-region pointers internally, the wrapper creates and cleans up a
+region for that call.
+
 ### Erlang FFI
 
 An Erlang call must be selected by an exact module-level `extern` signature:
@@ -67,6 +85,32 @@ or undeclared functions and checks arguments against the selected signature.
 Code generation lowers the call directly to `module:function(...)`; it does not
 perform implicit value conversion or verify that the installed Erlang/OTP
 module implements the declared signature. Runtime failures propagate normally.
+
+Terra values have one documented FFI representation:
+
+| Terra type | Erlang term and boundary rule |
+| --- | --- |
+| `Number` | integer or float |
+| `Int` | integer greater than or equal to zero |
+| `SInt` | integer |
+| `Float` | float |
+| `Atom` | atom |
+| `Bool` | atom `true` or `false` |
+| `String` | UTF-8 binary |
+| `List` | list |
+| `Tuple` | tuple |
+| `Map` | map |
+| `RestrictedMap` | `{terra_restricted_map, Capacity, Map}` with a valid non-negative capacity |
+| named struct | map containing `'$terra_struct' => StructName`; fields use atom keys |
+| named enum | map containing `'$terra_enum' => EnumName` and `tag => VariantName`; payload fields use atom keys |
+| multiple returns | tuple whose elements follow declaration order |
+
+Arguments already checked by Terra use these runtime representations directly.
+Every external return is validated before entering Terra code, including each
+element of a multiple-return tuple. A mismatch raises
+`{invalid_erlang_return, Module, Function, ExpectedType, Value}`. External
+signatures reject temporary-region pointers, inferred `Var`, and placeholder
+`State`, because none has a stable cross-boundary value contract.
 
 The current compiler pipeline is split into explicit passes:
 

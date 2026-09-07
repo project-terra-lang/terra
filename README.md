@@ -82,6 +82,19 @@ function Int Add(Int left, Int right) {
 Only exported functions are callable as `module.Function(...)`. Imported library
 files may omit `Main`; executable files still keep the fixed `Main` entry point.
 
+The same declaration exposes a checked Erlang-facing wrapper. Terra preserves
+the source function name as an exact Erlang atom and derives the BEAM module
+name from the file:
+
+```erlang
+terra_math_lib:'Add'(2, 3).
+```
+
+Wrapper arguments and returns use the term mapping below and are validated at
+runtime. Invalid Erlang arguments raise `invalid_erlang_argument`; an impossible
+Terra-side return mismatch raises `invalid_terra_export_return`. Functions with
+pointer, `Var`, or `State` parameters or returns cannot be exported.
+
 ## Erlang FFI
 
 Terra can call a deliberately selected Erlang function after declaring its
@@ -98,9 +111,27 @@ function Number Main(String Args) {
 
 Each `extern` declaration selects exactly one Erlang module/function pair and
 defines the argument and return types Terra will check. Calls without a matching
-declaration are rejected. Values are passed without automatic conversion, so an
-external signature must describe the Erlang function accurately; broader BEAM
-term mappings are intentionally handled as a separate language step.
+declaration are rejected. Values cross the boundary without hidden conversion:
+
+| Terra value | Erlang term |
+| --- | --- |
+| `Number` | integer or float |
+| `Int` | non-negative integer |
+| `SInt` | integer |
+| `Float` | float |
+| `Atom` | atom |
+| `Bool` | `true` or `false` atom |
+| `String` | UTF-8 binary |
+| `List`, `Tuple`, `Map` | list, tuple, map |
+| `RestrictedMap` | `{terra_restricted_map, Capacity, Map}` |
+| `struct Name` | map with `'$terra_struct' => 'Name'` and atom field keys |
+| `enum Name` | map with `'$terra_enum' => 'Name'`, an atom `tag`, and atom payload keys |
+| multiple returns | tuple in declared return order |
+
+FFI returns are checked at runtime against the declared Terra type. A mismatch
+raises `invalid_erlang_return` before the value can enter ordinary Terra code.
+Temporary-region pointers, `Var`, and the placeholder `State` type cannot cross
+the FFI boundary.
 
 ## Types
 
