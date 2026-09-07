@@ -160,8 +160,17 @@ main(_Args) ->
              {"pipe requires function call", "tests/programs/pipe_invalid.terra",
               fun expect_invalid_pipe/1},
              {"module-scope global and const declarations",
-              "tests/programs/module_declarations.terra",
+             "tests/programs/module_declarations.terra",
               fun expect_module_declarations/1},
+             {"module imports and exports",
+              "tests/programs/imports_exports.terra",
+              fun expect_imports_exports/1},
+             {"unexported imported function",
+              "tests/programs/import_unexported.terra",
+              fun expect_import_unexported/1},
+             {"unknown export",
+              "tests/programs/export_unknown.terra",
+              fun expect_export_unknown/1},
              {"top-level local requires function scope",
               "tests/programs/top_level_local.terra",
               fun expect_top_level_local/1},
@@ -381,6 +390,27 @@ expect_module_declarations({ok, Program}) ->
     maps:get(value, Shared) == {binary, plus, {var_ref, "inferred"}, {int, 4}} andalso
     maps:get(values, hd(maps:get(statements, Main))) == [{var_ref, "shared"}];
 expect_module_declarations(_) ->
+    false.
+
+expect_imports_exports({ok, Program}) ->
+    [#{name := "math_lib", path := Path}] = maps:get(imports, Program),
+    Main = find_function("Main", maps:get(functions, Program)),
+    [Value, _Stdout, Return] = maps:get(statements, Main),
+    Path == "tests/programs/math_lib.terra" andalso
+    maps:get(value, Value) == {remote_call, "math_lib", "Add", [{int, 2}, {int, 3}]} andalso
+    maps:get(values, Return) == [{var_ref, "value"}];
+expect_imports_exports(_) ->
+    false.
+
+expect_import_unexported({error, {in_function, "Main",
+                                  {unknown_imported_function, "math_lib", "Hidden"}}}) ->
+    true;
+expect_import_unexported(_) ->
+    false.
+
+expect_export_unknown({error, {unknown_export, "Missing"}}) ->
+    true;
+expect_export_unknown(_) ->
     false.
 
 expect_top_level_local({error, {variable_requires_scope, local}}) ->

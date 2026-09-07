@@ -7,10 +7,10 @@ VM. The language should stay simple and grow incrementally.
 ## Program Shape
 
 A Terra source file may begin with one optional `temp region(capacity);`
-configuration, followed by module-scope `global` and `const` declarations and
-function declarations. Other `local`, `temp`, and ordinary statements are only
-valid inside a function or block scope. Every valid program must declare exactly
-one entry point:
+configuration, followed by module-scope imports, exports, `global` and `const`
+declarations, user type declarations, and function declarations. Other `local`,
+`temp`, and ordinary statements are only valid inside a function or block scope.
+Every valid executable program must declare exactly one entry point:
 
 ```terra
 function Number Main(String Args) {
@@ -20,6 +20,33 @@ function Number Main(String Args) {
 
 The entry point receives command-line arguments as `String Args` and returns a
 `Number`.
+
+Module imports and exports are intentionally small and local:
+
+```terra
+import math_lib;
+
+function Number Main(String Args) {
+  return math_lib.Add(2, 3);
+}
+```
+
+`import math_lib;` resolves only to a sibling file named `math_lib.terra`; there
+is no package manager, version solving, or search path. Imported files are
+checked as library modules, so they may omit `Main`. A library must explicitly
+export any function another module should call:
+
+```terra
+export Add;
+
+function Int Add(Int left, Int right) {
+  return left + right;
+}
+```
+
+Only exported functions are visible through qualified calls such as
+`math_lib.Add(...)`. Structs, enums, globals, and constants remain local to the
+source file in this version.
 
 The current compiler pipeline is split into explicit passes:
 
@@ -617,7 +644,10 @@ a formal parser generator grammar.
 ```ebnf
 program         = [ region_decl ], { module_item } ;
 region_decl     = "temp", "region", "(", integer, ")", ";" ;
-module_item     = struct_decl | enum_decl | module_decl | function_decl ;
+module_item     = import_decl | export_decl | struct_decl | enum_decl
+                | module_decl | function_decl ;
+import_decl     = "import", identifier, ";" ;
+export_decl     = "export", identifier, ";" ;
 module_decl     = global_decl | const_decl ;
 struct_decl     = "struct", identifier, "{", { field_decl }, "}" ;
 field_decl      = value_type, identifier, ";" ;
@@ -690,6 +720,7 @@ unary           = [ "!" | "-" | "try" | "*" ], unary | primary ;
 primary         = literal
                 | identifier
                 | call
+                | remote_call
                 | variant
                 | member
                 | list
@@ -698,6 +729,8 @@ primary         = literal
                 | restricted_map ;
 
 call            = identifier, "(", [ expr, { ",", expr } ], ")" ;
+remote_call     = identifier, ".", identifier, "(", [ expr, { ",", expr } ],
+                  ")" ;
 variant         = identifier, ".", identifier, "(", [ expr, { ",", expr } ], ")" ;
 restricted_map  = "RestrictedMap", "(", expr, [ ",", expr ], ")" ;
 member          = identifier, ".", ( identifier | "*" ),

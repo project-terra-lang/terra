@@ -24,6 +24,7 @@ main(_Args) ->
                test_pointer_region_overflow(OutDir),
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
+               test_imports_exports(OutDir),
                test_source_map(OutDir),
                test_showcase_run(OutDir), test_counter_example(OutDir)],
     case lists:member(fail, Results) of
@@ -509,6 +510,21 @@ test_module_const_priority(OutDir) ->
         Other ->
             io:format("not ok - module consts have priority over function bindings~n"
                       "  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_imports_exports(OutDir) ->
+    Path = "tests/programs/imports_exports.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "Ada", OutDir)} of
+        {{ok, terra_imports_exports, Source},
+         {ok, terra_imports_exports, 5, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            LibBeam = filename:join(OutDir, "terra_math_lib.beam"),
+            expect("module imports and exports",
+                   contains(Binary, <<"terra_math_lib:terra_fn_add">>) andalso
+                   filelib:is_file(LibBeam));
+        Other ->
+            io:format("not ok - module imports and exports~n  got: ~p~n", [Other]),
             fail
     end.
 

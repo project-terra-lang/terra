@@ -58,6 +58,30 @@ function Number Main(String Args) {
 `Main` must accept `String Args` and return `Number`. Terra has no `void` type,
 so every function returns a real value.
 
+Terra modules can import sibling source files without a package manager:
+
+```terra
+import math_lib;
+
+function Number Main(String Args) {
+    return math_lib.Add(2, 3);
+}
+```
+
+An import named `math_lib` resolves to `math_lib.terra` in the same directory.
+Imported functions must be explicitly exported by the imported module:
+
+```terra
+export Add;
+
+function Int Add(Int left, Int right) {
+    return left + right;
+}
+```
+
+Only exported functions are callable as `module.Function(...)`. Imported library
+files may omit `Main`; executable files still keep the fixed `Main` entry point.
+
 ## Types
 
 Terra currently supports:

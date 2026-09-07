@@ -29,10 +29,46 @@ emit_file(Path, OutputPath) ->
     end.
 
 compile_file(Path, OutDir) ->
+    compile_file(Path, OutDir, executable, []).
+
+compile_file(Path, OutDir, ModuleKind, Seen) ->
+    AbsPath = filename:absname(Path),
+    case lists:member(AbsPath, Seen) of
+        true -> already_compiled_result(Path, OutDir);
+        false ->
+            case parse_for_codegen(Path, ModuleKind) of
+                {ok, Program} ->
+                    case compile_imports(maps:get(imports, Program, []), OutDir,
+                                         [AbsPath | Seen]) of
+                        ok -> compile_program(Path, Program, OutDir);
+                        Error -> Error
+                    end;
+                Error -> Error
+            end
+    end.
+
+parse_for_codegen(Path, executable) -> program:parse_file(Path);
+parse_for_codegen(Path, library) -> program:parse_library_file(Path).
+
+compile_imports([], _OutDir, _Seen) ->
+    ok;
+compile_imports([#{path := Path} | Rest], OutDir, Seen) ->
+    case compile_file(Path, OutDir, library, Seen) of
+        {ok, _Module, _BeamPath, _ErlangPath} -> compile_imports(Rest, OutDir, Seen);
+        Error -> Error
+    end.
+
+already_compiled_result(Path, OutDir) ->
+    Module = module_name(Path),
+    ModuleName = atom_to_list(Module),
+    {ok, Module, filename:join(OutDir, ModuleName ++ ".beam"),
+     filename:join(OutDir, ModuleName ++ ".erl")}.
+
+compile_program(Path, Program, OutDir) ->
     ModuleName = atom_to_list(module_name(Path)),
     ErlangPath = filename:join(OutDir, ModuleName ++ ".erl"),
     BeamPath = filename:join(OutDir, ModuleName ++ ".beam"),
-    case emit_file(Path, ErlangPath) of
+    case emit_program(Path, Program, ErlangPath) of
         {ok, Module, _} ->
             ok = filelib:ensure_dir(filename:join(OutDir, "placeholder")),
             case compile:file(ErlangPath, [debug_info, deterministic,
@@ -49,6 +85,7 @@ compile_file(Path, OutDir) ->
 run_file(Path, Args, OutDir) ->
     case compile_file(Path, OutDir) of
         {ok, Module, BeamPath, ErlangPath} ->
+            code:add_pathz(OutDir),
             code:purge(Module),
             code:delete(Module),
             BeamRoot = filename:rootname(BeamPath),
@@ -70,6 +107,22 @@ module_name(Path) ->
     Base = filename:basename(Path, filename:extension(Path)),
     list_to_atom("terra_" ++ sanitize_lower(Base)).
 
+emit_program(Path, Program, OutputPath) ->
+    Module = module_name(Path),
+    try
+        case codegen_pass(#{module => Module, program => Program}) of
+            {ok, #{source := Source}} ->
+                ok = filelib:ensure_dir(OutputPath),
+                case file:write_file(OutputPath, iolist_to_binary(Source)) of
+                    ok -> {ok, Module, OutputPath};
+                    {error, WriteReason} -> {error, {write_failed, WriteReason}}
+                end;
+            Error -> Error
+        end
+    catch
+        throw:{backend_error, BackendReason} -> {error, {backend, BackendReason}}
+    end.
+
 codegen_pass(#{module := Module, program := Program} = Context) ->
     Source = generate_module(Module, Program),
     Passes = maps:get(passes, Program, []) ++ [codegen],
@@ -82,9 +135,9 @@ generate_module(Module, #{functions := Functions} = Program) ->
     RegionCapacity = maps:get(region_capacity, Program, {auto, 0}),
     UsesPointers = uses_pointer_region(RegionCapacity),
     ["-module(", atom_to_list(Module), ").\n",
-     "-export([main/1]).\n\n",
+     "-export([", export_entries(Program), "]).\n\n",
      source_attribute(SourcePath, MainLine),
-     main_wrapper(RegionCapacity, UsesPointers),
+     main_wrapper(maps:get(entry, Program, none), RegionCapacity, UsesPointers),
      [generate_function(Function#{module_declarations => ModuleDeclarations}, SourcePath)
      || Function <- Functions],
      "-file(\"terra_runtime\", 1).\n",
@@ -94,12 +147,30 @@ generate_module(Module, #{functions := Functions} = Program) ->
 uses_pointer_region({fixed, _Capacity}) -> true;
 uses_pointer_region({auto, Estimate}) -> Estimate > 0.
 
-main_wrapper(Capacity, true) ->
+export_entries(#{entry := Entry, exports := Exports, functions := Functions}) ->
+    MainExports = case Entry of
+                      none -> [];
+                      _ -> ["main/1"]
+                  end,
+    FunctionExports =
+        [export_entry(Name, Functions) || #{name := Name} <- Exports],
+    lists:join(", ", MainExports ++ FunctionExports).
+
+export_entry(Name, Functions) ->
+    case [length(maps:get(params, Function)) || Function <- Functions,
+                                         maps:get(name, Function) == Name] of
+        [Arity] -> [function_name(Name), "/", integer_to_list(Arity)];
+        [] -> throw({backend_error, {unknown_export, Name}})
+    end.
+
+main_wrapper(none, _Capacity, _UsesPointers) ->
+    "";
+main_wrapper(_Entry, Capacity, true) ->
     ["main(Args) ->\n",
      "    TerraRegion = terra_region_start(", region_capacity(Capacity), "),\n",
      "    try terra_fn_main(terra_args(Args))\n",
      "    after terra_region_cleanup(TerraRegion) end.\n\n"];
-main_wrapper(_Capacity, false) ->
+main_wrapper(_Entry, _Capacity, false) ->
     "main(Args) ->\n    terra_fn_main(terra_args(Args)).\n\n".
 
 region_capacity({fixed, Capacity}) -> integer_to_list(Capacity);
@@ -547,6 +618,9 @@ expression({try_call, Name, Args}, Env) ->
 expression({pipe_call, Left, Name, Args}, Env) ->
     ["terra_pipe(fun() -> ", expression(Left, Env), " end, ",
      "fun(TerraPipeValue) -> ", pipe_function_call(Name, Args, Env), " end)"];
+expression({remote_call, ModuleName, FunctionName, Args}, Env) ->
+    [remote_module_name(ModuleName), ":", function_name(FunctionName), "(",
+     lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
 expression({call, Name, Args}, Env) -> function_call(Name, Args, Env).
 
 update_entry({{field, Name}, Value}, Env) ->
@@ -595,6 +669,9 @@ function_call(range, [Limit], Env) ->
     ["terra_range(", expression(Limit, Env), ")"];
 function_call(Name, _Args, _Env) ->
     throw({backend_error, {unsupported_constructor, Name}}).
+
+remote_module_name(Name) ->
+    "terra_" ++ sanitize_lower(Name).
 
 return_expression([Value], Env) -> expression(Value, Env);
 return_expression(Values, Env) ->

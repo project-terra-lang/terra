@@ -48,7 +48,7 @@ new features should arrive in small, understandable steps.
 - [x] Bring `examples/feature_showcase.terra` up to date with the supported language
 - [x] Add one or two small real examples, such as a CLI counter or tiny text game
 
-## Milestone 3: Small Powerful Language Features
+## Milestone 3: Small Powerful Language Features (Complete)
 
 - [x] Add user-defined records/structs for plain data
 - [x] Add tagged unions or enums for simple state machines and results
@@ -56,7 +56,7 @@ new features should arrive in small, understandable steps.
 - [x] Add temporary-region fake mutability with typed pointers, explicit
       dereference/write syntax, lifecycle cleanup, and dangling-pointer checks
 - [x] Add immutable update syntax for maps, restricted maps, and records
-- [ ] Add simple module-level imports/exports without a package manager
+- [x] Add simple module-level imports/exports without a package manager
 - [x] Add safe numeric/string/binary conversion helpers
 - [x] Keep nullability, failure propagation, and return-value rules easy to explain
 

@@ -30,13 +30,14 @@ run_case({Name, Expect}) ->
 
 tokenizer_rules() ->
     Keywords = "if elseif else unless case for_each for in range while do_while "
-               "stdout function fn struct enum variant bind return try let global local temp region lazy const "
+               "stdout function fn import export struct enum variant bind return try let global local temp region lazy const "
                "computed atomic thread_local Number Int SInt Float Atom Bool Map "
                "RestrictedMap List Tuple String State Var Void void True False "
                "true false null nil _",
     KeywordValues = [Value || {keyword, Value, _Span} <- tokenizer:tokenize(bin(Keywords))],
     ExpectedKeywords = ['if', elseif, 'else', unless, 'case', for_each, 'for', 'in',
-                        range, while, do_while, stdout, function, fn, struct, enum, variant,
+                        range, while, do_while, stdout, function, fn, import, export,
+                        struct, enum, variant,
                         bind, return, 'try',
                         'let', global, local, temp, region, lazy, const, computed, atomic,
                         thread_local, number, int, sint, float, atom, bool, map,

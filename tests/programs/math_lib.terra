@@ -1,0 +1,14 @@
+export Add;
+export Label;
+
+function Int Add(Int left, Int right) {
+    return left + right;
+}
+
+function String Label(String value) {
+    return value;
+}
+
+function Int Hidden(Int value) {
+    return value;
+}

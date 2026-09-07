@@ -1,0 +1,7 @@
+import math_lib;
+
+function Number Main(String Args) {
+    local Int value = math_lib.Add(2, 3);
+    stdout(math_lib.Label(Args));
+    return value;
+}

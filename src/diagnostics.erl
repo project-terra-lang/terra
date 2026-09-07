@@ -165,6 +165,35 @@ format({unknown_function, Name}) ->
     {unknown_function,
      io_lib:format("Function ~s is not defined.", [name(Name)]),
      "Define it before checking the program, or check the spelling."};
+format({duplicate_import, Name}) ->
+    {duplicate_import,
+     io_lib:format("Module ~s is imported more than once.", [Name]),
+     "Keep one import line for each module."};
+format({import_requires_source_path, Name}) ->
+    {import_requires_source_path,
+     io_lib:format("Import ~s needs a source file path.", [Name]),
+     "Check imports through a file so Terra can resolve sibling modules."};
+format({cyclic_import, Path}) ->
+    {cyclic_import,
+     io_lib:format("Import cycle reached ~s.", [Path]),
+     "Keep Terra module imports acyclic for now."};
+format({unknown_import, Name}) ->
+    {unknown_import,
+     io_lib:format("Module ~s is not imported.", [Name]),
+     "Add import ModuleName; at module scope and place ModuleName.terra beside this file."};
+format({unknown_imported_function, ModuleName, FunctionName}) ->
+    {unknown_imported_function,
+     io_lib:format("Module ~s does not export function ~s.",
+                   [ModuleName, FunctionName]),
+     "Add export FunctionName; in the imported module or call an exported function."};
+format({duplicate_export, Name}) ->
+    {duplicate_export,
+     io_lib:format("Function ~s is exported more than once.", [Name]),
+     "Keep one export line for each function."};
+format({unknown_export, Name}) ->
+    {unknown_export,
+     io_lib:format("Exported function ~s is not defined.", [Name]),
+     "Define the function in this module or remove the export line."};
 format({function_call_required, Name}) ->
     {function_call_required,
      io_lib:format("~s names a user-defined type, not a function.", [name(Name)]),

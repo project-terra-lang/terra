@@ -1,0 +1,6 @@
+import math_lib;
+
+function Number Main(String Args) {
+    local Int value = math_lib.Hidden(1);
+    return value;
+}

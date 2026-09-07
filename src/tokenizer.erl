@@ -16,6 +16,8 @@ keyword(<<"do_while">>) -> {ok, do_while};
 keyword(<<"stdout">>) -> {ok, stdout};
 keyword(<<"function">>) -> {ok, function};
 keyword(<<"fn">>)     -> {ok, fn};
+keyword(<<"import">>) -> {ok, import};
+keyword(<<"export">>) -> {ok, export};
 keyword(<<"struct">>) -> {ok, struct};
 keyword(<<"enum">>)   -> {ok, enum};
 keyword(<<"variant">>) -> {ok, variant};
