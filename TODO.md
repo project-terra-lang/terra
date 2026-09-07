@@ -46,8 +46,8 @@ compiler.
 
 ## Milestone 2: Testing and Quality
 
-- [ ] Create one command that builds and runs every test suite
-- [ ] Add unit tests for every tokenizer, parser, type-checker, and codegen rule
+- [X] Create one command that builds and runs every test suite
+- [X] Add unit tests for every tokenizer, parser, type-checker, and codegen rule
 - [ ] Add golden tests for generated Erlang source and diagnostics
 - [ ] Add end-to-end tests that compile and run Terra programs on BEAM
 - [ ] Add property-based tests for tokenization, parsing, and type checking

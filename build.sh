@@ -20,6 +20,20 @@ clean_project() {
     echo "[DONE CLEANING]"
 }
 
+test_project() {
+    clean_project
+    build_project
+    echo "TEST RUNNER STARTING"
+    echo "=============="
+    for suite in tests/*_tests.escript; do
+        echo "[TEST]: $suite"
+        escript "$suite"
+    done
+    echo "[ALL TEST SUITES PASSED]"
+    echo "=============="
+    echo "TEST RUNNER ENDING"
+}
+
 # 2. Read the command line flag ($1)
 case "$1" in
     --build|-b)
@@ -37,6 +51,11 @@ case "$1" in
         clean_project
         build_project
         ;;
+
+    --test|-t)
+        # If the user types --test or -t, build and run all test suites
+        test_project
+        ;;
     
     *)
         # If the user types nothing, or something we don't recognize, show a help menu
@@ -46,6 +65,7 @@ case "$1" in
         echo "  -b, --build    Compile the Erlang modules"
         echo "  -c, --clean    Remove compiled .beam files"
         echo "  -a, --all      Clean old files and then build"
+        echo "  -t, --test     Clean, build, and run every test suite"
         exit 1
         ;;
 esac
