@@ -14,7 +14,7 @@ understandable, and compatible with the Erlang ecosystem.
 - [x] Concurrent programming language with process and message primitives
 - [x] Immutable-by-default state with temporary-region fake mutability
 - [x] Turing-complete core through conditionals, recursion, and unbounded integers
-- [ ] Small standard library
+- [x] Small standard library
 - [x] Imperative source language that compiles to Erlang and runs on the BEAM
 
 Unchecked items are active directions, not promises of a large framework. See
@@ -633,10 +633,21 @@ include stable error codes, source locations, contextual labels, suggestions,
 and generated Erlang-to-Terra source mapping where available. Builds are
 deterministic for the same source and compiler version.
 
+`terra explain` walks the checked program and summarizes declared signatures,
+inferred initializer and return-expression types, call result types, scoped
+pattern bindings, and whether branches or exhaustive switches return on all
+paths or may continue.
+
 `terra fmt` is intentionally small and AST-based. It rewrites valid Terra
 source into the compiler's canonical style with four-space indentation, spaced
 operators, normalized declarations, and one final newline. This first formatter
 does not preserve comments.
+
+Editor and tooling integration stays intentionally thin while the language is
+still changing. The maintained boundary is documented in
+[docs/tooling-policy.md](docs/tooling-policy.md): use shell commands and minimal
+editor tasks now, and defer language-server, debugger, package-manager, and
+extension work until the syntax and compiler protocols settle.
 
 The examples directory contains focused programs for structs, enums, maps,
 loops, diagnostics, recursion, and the larger feature showcase.

@@ -2,9 +2,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Run Build Script",
+      "label": "Terra: build compiler",
       "type": "shell",
-      "command": "time ./build.sh -b",
+      "command": "./build.sh --all",
       "group": {
         "kind": "build",
         "isDefault": true
@@ -12,7 +12,39 @@
       "presentation": {
         "reveal": "always",
         "panel": "shared"
-      }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Terra: run all tests",
+      "type": "shell",
+      "command": "./build.sh --test",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Terra: check feature showcase",
+      "type": "shell",
+      "command": "./run.sh check examples/feature_showcase.terra",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Terra: explain feature showcase",
+      "type": "shell",
+      "command": "./run.sh explain examples/feature_showcase.terra",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
     }
   ]
 }

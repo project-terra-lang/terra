@@ -233,6 +233,12 @@ Compiler output is deterministic for the same source and path. Code generation
 preserves source declaration order, warning analysis finalizes bindings in
 declaration order, and BEAM compilation uses Erlang's deterministic mode.
 
+`terra explain <file.terra>` walks the checked AST and prints declared function
+signatures, inferred initializer and return-expression types, call result
+types, scoped pattern bindings, and control-flow notes for branches, loops, and
+exhaustive switches. Branch and switch notes distinguish paths that return from
+paths where execution may continue.
+
 ## Lexical Rules
 
 Whitespace separates tokens and has no meaning outside strings and character

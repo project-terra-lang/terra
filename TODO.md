@@ -70,7 +70,7 @@ new features should arrive in small, understandable steps.
       primitives
 - [x] Keep OTP integration library-first unless syntax clearly earns its place
 
-## Milestone 5: Tiny Standard Library and Tooling
+## Milestone 5: Tiny Standard Library and Tooling (Complete)
 
 - [x] Define a small standard-library policy and naming convention
 - [x] Add `print`, formatting, and basic console helpers on top of `stdout`
@@ -80,8 +80,8 @@ new features should arrive in small, understandable steps.
             with small checked-FFI helper surfaces
 - [x] Add a tiny testing/assertion library for Terra programs
 - [x] Add `terra fmt` after the syntax feels stable enough
-- [ ] Improve `terra explain` with inferred types and clearer control-flow notes
-- [ ] Keep editor/tooling work minimal until the language stops changing quickly
+- [x] Improve `terra explain` with inferred types and clearer control-flow notes
+- [x] Keep editor/tooling work minimal until the language stops changing quickly
 
 ## Ongoing Practices
 
