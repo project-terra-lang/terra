@@ -1,4 +1,4 @@
 function strict *SInt Main(*String Args) {
-    local State message = receive(State);
+    local Var message = receive(Var);
     return *SInt(0);
 }

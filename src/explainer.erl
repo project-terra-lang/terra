@@ -348,8 +348,10 @@ constructor_return_types(Name, _Args) -> [Name].
 
 member_type(map, "count") -> int;
 member_type(restricted_map, "count") -> int;
+member_type(state, "count") -> int;
 member_type(map, "members") -> list;
 member_type(restricted_map, "members") -> list;
+member_type(state, "members") -> list;
 member_type(_Type, _Field) -> unknown.
 
 binary_type(Op, _Left, _Right) when Op == eq_eq; Op == not_eq;
@@ -416,24 +418,6 @@ flatten_type(Type) ->
     lists:flatten(type_name(Type)).
 
 type_name(number) -> "Number";
-type_name(int) -> "Int";
-type_name(sint) -> "SInt";
-type_name(float) -> "Float";
-type_name(atom) -> "Atom";
-type_name(bool) -> "Bool";
-type_name(map) -> "Map";
-type_name(restricted_map) -> "RestrictedMap";
-type_name(list) -> "List";
-type_name(tuple) -> "Tuple";
-type_name(string) -> "String";
-type_name(binary) -> "Binary";
-type_name(pid) -> "PID";
-type_name(reference) -> "Reference";
-type_name(var) -> "Var";
-type_name(state) -> "State";
 type_name(unknown) -> "unknown";
-type_name({pointer, Type}) -> ["*", type_name(Type)];
-type_name({strict_pointer, Type}) -> ["strict *", type_name(Type)];
-type_name({named, Name}) -> Name;
-type_name(Type) when is_atom(Type) -> atom_to_list(Type);
+type_name(Type) when is_atom(Type); is_tuple(Type) -> datatypes:display_name(Type);
 type_name(Type) -> io_lib:format("~p", [Type]).

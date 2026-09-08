@@ -224,7 +224,7 @@ format({undeclared_erlang_function, ModuleName, FunctionName}) ->
 format({invalid_erlang_ffi_type, Type}) ->
     {invalid_erlang_ffi_type,
      io_lib:format("~s cannot cross the Erlang FFI boundary.", [type_name(Type)]),
-     "Use a concrete value type; pointers, Var, and State are process/compiler-local."};
+     "Use a concrete Erlang-mapped value type; temporary pointers and Var stay compiler-local."};
 format({invalid_erlang_export_type, Name, Type}) ->
     {invalid_erlang_export_type,
      io_lib:format("Exported function ~s uses boundary-unsafe type ~s.",
@@ -234,6 +234,15 @@ format({type_has_no_constructor, Type}) ->
     {type_has_no_constructor,
      io_lib:format("~s does not have a value constructor.", [type_name(Type)]),
      "Use to_binary for Binary or obtain PID/Reference values from a typed BEAM call."};
+format({state_arity, Actual}) ->
+    {state_arity,
+     io_lib:format("State expects 0 or 1 argument, but received ~p.", [Actual]),
+     "Use State() for an empty snapshot or State(#(...)) to adopt a map."};
+format({invalid_state_value, Type}) ->
+    {invalid_state_value,
+     io_lib:format("State can be built from Map or State, but received ~s.",
+                   [type_name(Type)]),
+     "Wrap map literals or existing state snapshots with State(...)."};
 format({function_call_required, Name}) ->
     {function_call_required,
      io_lib:format("~s names a user-defined type, not a function.", [name(Name)]),
@@ -409,7 +418,7 @@ format({send_requires_pid, Type}) ->
 format({invalid_process_value_type, Type}) ->
     {invalid_process_value_type,
      io_lib:format("~s cannot cross a Terra process boundary.", [type_name(Type)]),
-     "Send immutable BEAM values; temporary pointers, State, and Var stay process-local."};
+     "Send immutable BEAM values; temporary pointers and Var stay process-local."};
 format({unknown_message_type, Name}) ->
     {unknown_message_type,
      io_lib:format("Message type ~s is not defined.", [Name]),

@@ -18,6 +18,7 @@ main(_Args) ->
                test_console_helpers(OutDir), test_format_failures(OutDir),
                test_restricted_map(OutDir),
                test_immutable_updates(OutDir), test_restricted_map_update_overflow(OutDir),
+               test_state_type(OutDir),
                test_records(OutDir),
                test_enums(OutDir),
                test_enum_pattern_ignore(OutDir),
@@ -455,6 +456,22 @@ test_restricted_map_update_overflow(OutDir) ->
     expect("restricted map updates enforce capacity",
            is_runtime_reason(Result, {invalid_restricted_map, 1,
                                       #{first => 1, second => 2}})).
+
+test_state_type(OutDir) ->
+    Path = "tests/programs/state_type.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "Ada", OutDir)} of
+        {{ok, terra_state_type, Source},
+         {ok, terra_state_type, 3, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("State snapshots are useful map-backed values",
+                   contains(Binary, <<"terra_ffi_valid(state, Value) -> is_map(Value)">>) andalso
+                   contains(Binary, <<"terra_receive(state)">>) andalso
+                   contains(Binary, <<"terra_update(">>));
+        Other ->
+            io:format("not ok - State snapshots are useful map-backed values~n"
+                      "  got: ~p~n", [Other]),
+            fail
+    end.
 
 test_records(OutDir) ->
     Path = "tests/programs/records.terra",

@@ -1,5 +1,11 @@
 # Terra
 
+> **Archive status:** Terra is complete as a personal research project and is
+> intended to be archived publicly. The project was entirely vibecoded. Anyone
+> interested may fork it, reshape it, use it, commercialize it, or sell derived
+> work without asking permission or giving credit. See [ARCHIVE.md](ARCHIVE.md)
+> and [LICENSE](LICENSE).
+
 Terra is a small research language with a Lua-like imperative syntax that
 transpiles to Erlang and runs on the BEAM. It is aimed at programs such as game
 servers and state machines, where immutable data and Erlang interoperability are
@@ -102,7 +108,7 @@ terra_math_lib:'Add'(2, 3).
 Wrapper arguments and returns use the term mapping below and are validated at
 runtime. Invalid Erlang arguments raise `invalid_erlang_argument`; an impossible
 Terra-side return mismatch raises `invalid_terra_export_return`. Functions with
-pointer, `Var`, or `State` parameters or returns cannot be exported.
+pointer or `Var` parameters or returns cannot be exported.
 
 ## Erlang FFI
 
@@ -136,14 +142,15 @@ declaration are rejected. Values cross the boundary without hidden conversion:
 | `Reference` | reference |
 | `List`, `Tuple`, `Map` | list, tuple, map |
 | `RestrictedMap` | `{terra_restricted_map, Capacity, Map}` |
+| `State` | native map |
 | `struct Name` | map with `'$terra_struct' => 'Name'` and atom field keys |
 | `enum Name` | map with `'$terra_enum' => 'Name'`, an atom `tag`, and atom payload keys |
 | multiple returns | tuple in declared return order |
 
 FFI returns are checked at runtime against the declared Terra type. A mismatch
 raises `invalid_erlang_return` before the value can enter ordinary Terra code.
-Temporary-region pointers, `Var`, and the placeholder `State` type cannot cross
-the FFI boundary.
+Temporary-region pointers and `Var` cannot cross the FFI boundary. `State`
+crosses as a native map.
 
 ### OTP Integration Policy
 
@@ -231,15 +238,26 @@ Terra currently supports:
 
 - Numbers: `Number`, `Int`, `SInt`, and `Float`
 - Scalars: `Atom` and `Bool`
-- Collections: `Map`, `RestrictedMap`, `List`, and `Tuple`
+- Collections: `Map`, `RestrictedMap`, `State`, `List`, and `Tuple`
 - Text and bytes: `String` and `Binary`
 - BEAM handles: `PID` and `Reference`
 - User data: `struct` and `enum`
 - Temporary-region pointers: `*Type`, `**Type`, and deeper pointer types
 - Strict pointer contracts: `strict *Type`
 
-`Var` asks the compiler to infer a concrete type. `State` is reserved as a
-placeholder for future state-machine work.
+`Var` asks the compiler to infer a concrete type. `State` is a map-backed
+snapshot type for state-machine and game-server style data. `State()` creates an
+empty snapshot, and `State(#(:key => value))` adopts a map literal or map value
+as immutable state. State values support `.count`, `.members`, member lookup,
+immutable update syntax, Erlang FFI, and process messages while remaining native
+BEAM maps at runtime.
+
+Internally, the compiler keeps a richer datatype catalog in `src/datatypes.erl`.
+It groups built-ins into numeric, scalar, aggregate, text, BEAM-handle, pointer,
+user-defined, and meta categories, records constructibility and BEAM/process
+boundary behavior, and exposes display names and type traits for other compiler
+passes. This is inspired by modern systems-language type metadata while keeping
+Terra's surface syntax small.
 
 `Number` accepts integers and floats. `Int` represents non-negative integer
 intent, while `SInt` represents signed integer intent. Both use BEAM
@@ -325,7 +343,8 @@ returns `:ok`. `receive(Type)` blocks for the next mailbox message, validates it
 against the concrete built-in, struct, or enum type, and returns it. A mismatch
 raises `invalid_terra_message` after consuming that message.
 
-Pointers, `Var`, and `State` cannot be sent or captured as spawn arguments.
+Pointers and `Var` cannot be sent or captured as spawn arguments. `State` can be
+sent as a native immutable map snapshot.
 When a module uses temporary pointers, each spawned process receives and cleans
 up its own temporary region. These primitives intentionally provide no links,
 monitors, supervisors, registered names, selective patterns, or timeouts; those
@@ -584,6 +603,14 @@ Restricted maps add an immutable member-capacity limit:
 
 ```terra
 local RestrictedMap scores = RestrictedMap(3, #("alice" => 10));
+```
+
+State snapshots give map-shaped data an explicit role:
+
+```terra
+local State session = State(#(:score => 1));
+local State ready = session{ ready = true };
+local Int count = ready.count;
 ```
 
 Loops include collection iteration, numeric ranges, `while`, and `do while`:

@@ -666,12 +666,8 @@ first_invalid_external_type([External | Rest]) ->
         [Type | _] -> Type
     end.
 
-ffi_type_allowed({pointer, _Type}) -> false;
-ffi_type_allowed({strict_pointer, _Type}) -> false;
-ffi_type_allowed(state) -> false;
-ffi_type_allowed(var) -> false;
-ffi_type_allowed({named, _Name}) -> true;
-ffi_type_allowed(Type) -> datatypes:is_type(Type).
+ffi_type_allowed(Type) ->
+    datatypes:crosses_erlang_ffi(Type).
 
 first_duplicate([], _Seen) -> none;
 first_duplicate([Value | Rest], Seen) ->
@@ -2020,7 +2016,7 @@ validate_update(Base, Updates, Sigs, Env) ->
     case single_type(Base, Sigs, Env) of
         {ok, {named, TypeName}} ->
             validate_record_update(TypeName, Updates, Sigs, Env);
-        {ok, Type} when Type == map; Type == restricted_map ->
+        {ok, Type} when Type == map; Type == restricted_map; Type == state ->
             validate_map_update(Updates, Sigs, Env);
         {ok, Type} ->
             {error, {invalid_update_target, Type}};
@@ -2242,6 +2238,8 @@ validate_call("format", [Template | Values], Sigs, Env) ->
 validate_call(range, Args, Sigs, Env) -> validate_range(Args, Sigs, Env);
 validate_call(restricted_map, Args, Sigs, Env) ->
     validate_restricted_map(Args, Sigs, Env);
+validate_call(state, Args, Sigs, Env) ->
+    validate_state(Args, Sigs, Env);
 validate_call({remote, ModuleName, FunctionName}, Args, Sigs, Env) ->
     validate_remote_call(ModuleName, FunctionName, Args, Sigs, Env);
 validate_call({ffi, ModuleName, FunctionName}, Args, Sigs, Env) ->
@@ -2317,10 +2315,22 @@ validate_receive_type(Type, _Sigs) ->
 
 validate_process_types([], Returns) -> {ok, Returns};
 validate_process_types([Type | Rest], Returns) ->
-    case ffi_type_allowed(Type) of
+    case datatypes:crosses_process(Type) of
         true -> validate_process_types(Rest, Returns);
         false -> {error, {invalid_process_value_type, Type}}
     end.
+
+validate_state([], _Sigs, _Env) ->
+    {ok, [state]};
+validate_state([Value], Sigs, Env) ->
+    case single_type(Value, Sigs, Env) of
+        {ok, map} -> {ok, [state]};
+        {ok, state} -> {ok, [state]};
+        {ok, Type} -> {error, {invalid_state_value, Type}};
+        Error -> Error
+    end;
+validate_state(Args, _Sigs, _Env) ->
+    {error, {state_arity, length(Args)}}.
 
 validate_remote_call(ModuleName, FunctionName, Args, Sigs, Env) ->
     case maps:find({remote, ModuleName, FunctionName}, Sigs) of
@@ -2516,11 +2526,13 @@ infer_types({pointer_read, Value}, Sigs, Env) ->
     end;
 infer_types({member, Value, Name}, Sigs, Env) ->
     case single_type(Value, Sigs, Env) of
-        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "count" ->
+        {ok, Type} when (Type == map orelse Type == restricted_map orelse Type == state),
+                        Name == "count" ->
             {ok, [int]};
-        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "members" ->
+        {ok, Type} when (Type == map orelse Type == restricted_map orelse Type == state),
+                        Name == "members" ->
             {ok, [list]};
-        {ok, Type} when Type == map; Type == restricted_map -> {ok, [var]};
+        {ok, Type} when Type == map; Type == restricted_map; Type == state -> {ok, [var]};
         {ok, {named, TypeName}} -> named_field_type(TypeName, Name, Sigs);
         {ok, _Type} -> {ok, [var]};
         Error -> Error
@@ -2623,11 +2635,7 @@ orderable_types(Left, Right) ->
     (is_number_type(Left) andalso is_number_type(Right)) orelse
     (Left == string andalso Right == string).
 
-is_number_type(number) -> true;
-is_number_type(int) -> true;
-is_number_type(sint) -> true;
-is_number_type(float) -> true;
-is_number_type(_) -> false.
+is_number_type(Type) -> datatypes:is_number_type(Type).
 
 validate_range([Limit], Sigs, Env) ->
     case single_type(Limit, Sigs, Env) of

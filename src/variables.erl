@@ -618,11 +618,13 @@ infer_type({map, Pairs}, Env) ->
     end;
 infer_type({member, Value, Name}, Env) ->
     case infer_type(Value, Env) of
-        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "count" ->
+        {ok, Type} when (Type == map orelse Type == restricted_map orelse Type == state),
+                        Name == "count" ->
             {ok, int};
-        {ok, Type} when (Type == map orelse Type == restricted_map), Name == "members" ->
+        {ok, Type} when (Type == map orelse Type == restricted_map orelse Type == state),
+                        Name == "members" ->
             {ok, list};
-        {ok, Type} when Type == map; Type == restricted_map -> {ok, var};
+        {ok, Type} when Type == map; Type == restricted_map; Type == state -> {ok, var};
         {ok, _Type} -> {ok, var};
         Error -> Error
     end;
@@ -638,10 +640,7 @@ infer_type({unary, Op, Value}, Env) ->
         {error, Reason} -> {error, Reason}
     end;
 infer_type({call, state, Args}, Env) ->
-    case infer_type_list(Args, Env) of
-        ok -> {ok, state};
-        {error, Reason} -> {error, Reason}
-    end;
+    infer_state(Args, Env);
 infer_type({call, Name, Args}, Env)
   when Name == number; Name == int; Name == sint; Name == float ->
     infer_numeric_conversion(Name, Args, Env);
@@ -686,6 +685,18 @@ infer_restricted_map([Capacity, Value], Env) ->
     end;
 infer_restricted_map(Args, _Env) ->
     {error, {restricted_map_arity, length(Args)}}.
+
+infer_state([], _Env) ->
+    {ok, state};
+infer_state([Value], Env) ->
+    case infer_type(Value, Env) of
+        {ok, map} -> {ok, state};
+        {ok, state} -> {ok, state};
+        {ok, Type} -> {error, {invalid_state_value, Type}};
+        {error, Reason} -> {error, Reason}
+    end;
+infer_state(Args, _Env) ->
+    {error, {state_arity, length(Args)}}.
 
 infer_type_list([], _Env) ->
     ok;

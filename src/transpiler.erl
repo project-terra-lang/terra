@@ -759,6 +759,7 @@ function_call(restricted_map, [Capacity, Value], Env) ->
     ["terra_restricted_map(", expression(Capacity, Env), ", ",
      expression(Value, Env), ")"];
 function_call(state, [], _Env) -> "#{}";
+function_call(state, [Value], Env) -> expression(Value, Env);
 function_call(string, [Arg], Env) ->
     ["unicode:characters_to_binary(", expression(Arg, Env), ")"];
 function_call(number, [Arg], Env) -> expression(Arg, Env);
@@ -872,6 +873,7 @@ runtime_helpers() ->
     "terra_ffi_valid(list, Value) -> is_list(Value);\n"
     "terra_ffi_valid(tuple, Value) -> is_tuple(Value);\n"
     "terra_ffi_valid(map, Value) -> is_map(Value);\n"
+    "terra_ffi_valid(state, Value) -> is_map(Value);\n"
     "terra_ffi_valid(restricted_map, {terra_restricted_map, Capacity, Value}) ->\n"
     "    is_integer(Capacity) andalso Capacity >= 0 andalso is_map(Value)\n"
     "        andalso map_size(Value) =< Capacity;\n"

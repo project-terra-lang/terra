@@ -81,7 +81,9 @@ print_type_list([number | Rest]) ->
     print_number_types(datatypes:number_types()),
     print_type_list(Rest);
 print_type_list([Type | Rest]) ->
-    io:format("  ~s~n", [display_type(Type)]),
+    Info = datatypes:type_info(Type),
+    io:format("  ~s (~s)~n",
+              [datatypes:display_name(Type), atom_to_list(maps:get(category, Info))]),
     print_type_list(Rest).
 
 print_number_types([]) ->
@@ -90,21 +92,7 @@ print_number_types([Type | Rest]) ->
     io:format("    - ~s~n", [display_type(Type)]),
     print_number_types(Rest).
 
-display_type(number) -> "Number";
-display_type(int)    -> "Int";
-display_type(sint)   -> "SInt";
-display_type(float)  -> "Float";
-display_type(atom)   -> "Atom";
-display_type(bool)   -> "Bool";
-display_type(map)    -> "Map";
-display_type(restricted_map) -> "RestrictedMap";
-display_type(list)   -> "List";
-display_type(tuple)  -> "Tuple";
-display_type(string) -> "String";
-display_type(binary) -> "Binary";
-display_type(pid) -> "PID";
-display_type(reference) -> "Reference";
-display_type(Type)   -> atom_to_list(Type).
+display_type(Type) -> datatypes:display_name(Type).
 
 print_tokens(Path) ->
     case tokenizer:tokenize_file(Path) of

@@ -1,0 +1,27 @@
+extern Bool erlang.erlang.is_map(State value);
+extern Bool erlang.maps.is_key(Atom key, State value);
+
+function strict *SInt Main(*String Args) {
+    local State empty = State();
+    local State initial = State(#(:name => Args.*, :score => 1));
+    local State updated = initial{ ready = true, :score => 2 };
+    local PID parent = self();
+    local PID worker = spawn(Worker(parent, updated));
+    local State received = receive(State);
+
+    if empty.count == 0 &&
+       initial.count == 2 &&
+       updated.count == 3 &&
+       received.count == 3 &&
+       erlang.erlang.is_map(received) &&
+       erlang.maps.is_key(:ready, received) {
+        return *SInt(received.count);
+    }
+
+    return *SInt(0);
+}
+
+function Atom Worker(PID parent, State snapshot) {
+    send(parent, snapshot);
+    return :ok;
+}

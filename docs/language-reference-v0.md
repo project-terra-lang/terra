@@ -69,7 +69,7 @@ result before returning it to Erlang. Invalid arguments raise
 unexpected internal result raises
 `{invalid_terra_export_return, Function, ExpectedType, Value}`. Multiple Terra
 returns become one tuple. Exported signatures may use every mapped concrete
-type listed below, but not pointers, `Var`, or `State`. If the implementation
+type listed below, but not pointers or `Var`. If the implementation
 uses temporary-region pointers internally, the wrapper creates and cleans up a
 region for that call.
 
@@ -110,6 +110,7 @@ Terra values have one documented FFI representation:
 | `Tuple` | tuple |
 | `Map` | map |
 | `RestrictedMap` | `{terra_restricted_map, Capacity, Map}` with a valid non-negative capacity |
+| `State` | map |
 | named struct | map containing `'$terra_struct' => StructName`; fields use atom keys |
 | named enum | map containing `'$terra_enum' => EnumName` and `tag => VariantName`; payload fields use atom keys |
 | multiple returns | tuple whose elements follow declaration order |
@@ -118,8 +119,8 @@ Arguments already checked by Terra use these runtime representations directly.
 Every external return is validated before entering Terra code, including each
 element of a multiple-return tuple. A mismatch raises
 `{invalid_erlang_return, Module, Function, ExpectedType, Value}`. External
-signatures reject temporary-region pointers, inferred `Var`, and placeholder
-`State`, because none has a stable cross-boundary value contract.
+signatures reject temporary-region pointers and inferred `Var`, because neither
+has a stable cross-boundary value contract.
 
 ### OTP integration policy
 
@@ -207,10 +208,11 @@ local String reply = receive(String);
 The receive type may be a concrete built-in type or a declared struct or enum.
 A mismatched next message is consumed and raises
 `{invalid_terra_message, ExpectedType, Value}`. The transfer rules are the same
-as the FFI mapping: pointers, `Var`, and `State` cannot be messages or spawn
-arguments. Each spawned process gets an independent temporary region when the
-module uses pointers. Spawning is unlinked and unsupervised; links, monitors,
-timeouts, selective receive, and OTP behavior remain library concerns.
+as the FFI mapping: pointers and `Var` cannot be messages or spawn arguments;
+`State` messages cross as immutable native map snapshots. Each spawned process
+gets an independent temporary region when the module uses pointers. Spawning is
+unlinked and unsupervised; links, monitors, timeouts, selective receive, and OTP
+behavior remain library concerns.
 
 The current compiler pipeline is split into explicit passes:
 
@@ -273,8 +275,11 @@ levels by prefixing one or more `*`, such as `*String`, `**Int`, or `***Player`.
 constructed pointer whose pointee type matches exactly.
 
 `Number` accepts `Int`, `SInt`, and `Float` values. `Var` asks the compiler to
-infer the concrete type from the initializer. `State` is currently accepted as a
-research placeholder type for future runtime state semantics.
+infer the concrete type from the initializer. `State` is a map-backed snapshot
+type for state-machine and game-server data. `State()` creates an empty
+snapshot, while `State(map)` adopts an existing map snapshot. It supports the
+same `.count`, `.members`, member lookup, immutable update, FFI, and process
+message behavior as ordinary native maps.
 
 ### Numeric Semantics
 

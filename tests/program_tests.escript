@@ -117,9 +117,11 @@ main(_Args) ->
              {"restricted map properties", "tests/programs/restricted_map.terra",
               fun expect_restricted_map/1},
              {"restricted map capacity", "tests/programs/restricted_map_overflow.terra",
-              fun expect_restricted_map_overflow/1},
+             fun expect_restricted_map_overflow/1},
              {"immutable updates", "tests/programs/immutable_updates.terra",
               fun expect_immutable_updates/1},
+             {"state snapshots", "tests/programs/state_type.terra",
+              fun expect_state_type/1},
              {"record update field names", "tests/programs/record_update_bad_field.terra",
               fun expect_record_update_bad_field/1},
              {"record update field types", "tests/programs/record_update_bad_type.terra",
@@ -588,8 +590,28 @@ expect_process_send_invalid(
 expect_process_send_invalid(_) -> false.
 
 expect_process_receive_invalid(
-  {error, {in_function, "Main", {invalid_process_value_type, state}}}) -> true;
+  {error, {in_function, "Main", {invalid_process_value_type, var}}}) -> true;
 expect_process_receive_invalid(_) -> false.
+
+expect_state_type({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    Statements = maps:get(statements, Main),
+    lists:any(fun
+        (#{kind := variable, type := state,
+           value := {call, state, [{map, _Pairs}]}}) -> true;
+        (_) -> false
+    end, Statements) andalso
+    lists:any(fun
+        (#{kind := variable, type := state,
+           value := {update, {var_ref, "initial"}, _Updates}}) -> true;
+        (_) -> false
+    end, Statements) andalso
+    lists:any(fun
+        (#{kind := variable, type := state,
+           value := {call, "receive", [{type_spec, state}]}}) -> true;
+        (_) -> false
+    end, Statements);
+expect_state_type(_) -> false.
 
 expect_process_pointer_argument(
   {error, {in_function, "Main", {invalid_process_value_type, {pointer, int}}}}) -> true;

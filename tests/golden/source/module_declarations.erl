@@ -52,6 +52,7 @@ terra_ffi_valid(reference, Value) -> is_reference(Value);
 terra_ffi_valid(list, Value) -> is_list(Value);
 terra_ffi_valid(tuple, Value) -> is_tuple(Value);
 terra_ffi_valid(map, Value) -> is_map(Value);
+terra_ffi_valid(state, Value) -> is_map(Value);
 terra_ffi_valid(restricted_map, {terra_restricted_map, Capacity, Value}) ->
     is_integer(Capacity) andalso Capacity >= 0 andalso is_map(Value)
         andalso map_size(Value) =< Capacity;
