@@ -60,7 +60,7 @@ new features should arrive in small, understandable steps.
 - [x] Add safe numeric/string/binary conversion helpers
 - [x] Keep nullability, failure propagation, and return-value rules easy to explain
 
-## Milestone 4: Erlang and BEAM Interop
+## Milestone 4: Erlang and BEAM Interop (Complete)
 
 - [x] Add an explicit Erlang FFI for calling selected Erlang modules/functions
 - [x] Map Terra values predictably to Erlang terms
@@ -68,7 +68,7 @@ new features should arrive in small, understandable steps.
 - [x] Support the BEAM types Terra needs most: binaries, PIDs, references, and maps
 - [x] Add lightweight process spawning and message send/receive as language/library
       primitives
-- [ ] Keep OTP integration library-first unless syntax clearly earns its place
+- [x] Keep OTP integration library-first unless syntax clearly earns its place
 
 ## Milestone 5: Tiny Standard Library and Tooling
 

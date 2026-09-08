@@ -1,0 +1,12 @@
+-- OTP modules remain ordinary checked library calls.
+extern String erlang.filename.basename(String path);
+
+function String Basename(String path) {
+    return erlang.filename.basename(path);
+}
+
+function strict *SInt Main(*String Args) {
+    stdout(Args.*);
+    stdout(Basename("/tmp/terra/demo.terra"));
+    return *SInt(0);
+}

@@ -143,6 +143,21 @@ raises `invalid_erlang_return` before the value can enter ordinary Terra code.
 Temporary-region pointers, `Var`, and the placeholder `State` type cannot cross
 the FFI boundary.
 
+### OTP Integration Policy
+
+OTP integration is library-first. Prefer typed `extern` calls, ordinary Terra
+modules, exported Terra functions, or a small Erlang callback adapter before
+adding language syntax for an OTP behavior. New syntax must provide a repeated,
+useful static guarantee with clear process, failure, and temporary-region
+semantics; shortening a library call is not enough.
+
+Terra's process primitives remain a small foundation rather than replacements
+for supervisors, applications, releases, links, monitors, or behaviors. The
+complete decision rule is recorded in
+[docs/otp-integration-policy.md](docs/otp-integration-policy.md), with a runnable
+checked-FFI example in
+[examples/otp_library_first.terra](examples/otp_library_first.terra).
+
 ## Types
 
 Terra currently supports:

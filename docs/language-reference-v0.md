@@ -119,6 +119,17 @@ element of a multiple-return tuple. A mismatch raises
 signatures reject temporary-region pointers, inferred `Var`, and placeholder
 `State`, because none has a stable cross-boundary value contract.
 
+### OTP integration policy
+
+OTP integration remains library-first. Typed `extern` declarations, Terra
+modules, exported functions, and small Erlang callback adapters are preferred
+over new behavior-specific syntax. Syntax is considered only for a recurring
+pattern where the compiler can add a meaningful static guarantee and define
+complete process, failure, and temporary-region semantics while lowering to
+ordinary OTP APIs. Terra does not currently add syntax for supervisors,
+applications, releases, or OTP behaviors. See
+`docs/otp-integration-policy.md` for the maintained decision criteria.
+
 ### Process primitives
 
 Terra has four built-in process operations:

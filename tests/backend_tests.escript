@@ -27,6 +27,7 @@ main(_Args) ->
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_imports_exports(OutDir),
                test_erlang_ffi(OutDir),
+               test_otp_library_first(OutDir),
                test_erlang_term_mapping(OutDir),
                test_erlang_return_validation(OutDir),
                test_beam_value_types(OutDir),
@@ -129,6 +130,20 @@ test_counter_example(OutDir) ->
             expect("run counter example on BEAM", true);
         Other ->
             io:format("not ok - run counter example on BEAM~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_otp_library_first(OutDir) ->
+    Path = "examples/otp_library_first.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_otp_library_first, Source},
+         {ok, terra_otp_library_first, 0, _BeamPath, _ErlangPath}} ->
+            expect("OTP integration stays library-first",
+                   contains(iolist_to_binary(Source),
+                            <<"filename:basename(Terra_path_">>));
+        Other ->
+            io:format("not ok - OTP integration stays library-first~n  got: ~p~n",
+                      [Other]),
             fail
     end.
 
