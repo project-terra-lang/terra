@@ -190,6 +190,9 @@ main(_Args) ->
              {"module imports and exports",
               "tests/programs/imports_exports.terra",
               fun expect_imports_exports/1},
+             {"standard library import",
+              "tests/programs/std_collection_usage.terra",
+              fun expect_std_collection/1},
              {"unexported imported function",
               "tests/programs/import_unexported.terra",
               fun expect_import_unexported/1},
@@ -202,6 +205,9 @@ main(_Args) ->
              {"selected Erlang FFI call",
               "tests/programs/erlang_ffi.terra",
               fun expect_erlang_ffi/1},
+             {"webserver Erlang FFI example",
+              "tests/programs/webserver_ffi.terra",
+              fun expect_webserver_ffi/1},
              {"undeclared Erlang FFI call",
               "tests/programs/erlang_ffi_undeclared.terra",
               fun expect_erlang_ffi_undeclared/1},
@@ -469,6 +475,24 @@ expect_imports_exports({ok, Program}) ->
 expect_imports_exports(_) ->
     false.
 
+expect_std_collection({ok, Program}) ->
+    [#{name := "std_collection", path := Path}] = maps:get(imports, Program),
+    Main = find_function("Main", maps:get(functions, Program)),
+    [_Values, Count, Total, Reversed, _If, _Stdout, Return] = maps:get(statements, Main),
+    filename:basename(Path) == "std_collection.terra" andalso
+    filename:basename(filename:dirname(Path)) == "std" andalso
+    maps:get(value, Count) == {remote_call, "std_collection", "Length",
+                               [{var_ref, "values"}]} andalso
+    maps:get(value, Total) == {remote_call, "std_collection", "Sum",
+                               [{var_ref, "values"}]} andalso
+    maps:get(value, Reversed) == {remote_call, "std_collection", "Reverse",
+                                  [{var_ref, "values"}]} andalso
+    maps:get(values, Return) ==
+        [{pointer_new, {call, sint,
+          [{binary, plus, {var_ref, "count"}, {var_ref, "total"}}]}}];
+expect_std_collection(_) ->
+    false.
+
 expect_import_unexported({error, {in_function, "Main",
                                   {unknown_imported_function, "math_lib", "Hidden"}}}) ->
     true;
@@ -494,6 +518,29 @@ expect_erlang_ffi({ok, Program}) ->
         [{pointer_new, {call, sint,
           [{ffi_call, "lists", "sum", [{var_ref, "values"}], [number]}]}}];
 expect_erlang_ffi(_) ->
+    false.
+
+expect_webserver_ffi({ok, Program}) ->
+    Externals = maps:get(externals, Program),
+    Main = find_function("Main", maps:get(functions, Program)),
+    length(Externals) == 5 andalso
+    lists:any(fun(#{module := "application", function := "ensure_all_started",
+                    params := [#{type := atom}], return_types := [tuple]}) -> true;
+                 (_) -> false
+              end, Externals) andalso
+    lists:any(fun(#{module := "inets", function := "start",
+                    params := [#{type := atom}, #{type := list}],
+                    return_types := [tuple]}) -> true;
+                 (_) -> false
+              end, Externals) andalso
+    lists:any(fun(#{module := "inets", function := "stop",
+                    params := [#{type := atom}, #{type := pid}],
+                    return_types := [atom]}) -> true;
+                 (_) -> false
+              end, Externals) andalso
+    maps:get(values, hd(lists:reverse(maps:get(statements, Main)))) ==
+        [{pointer_new, {call, sint, [{int, 0}]}}];
+expect_webserver_ffi(_) ->
     false.
 
 expect_erlang_ffi_undeclared(

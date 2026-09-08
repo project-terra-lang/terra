@@ -79,6 +79,12 @@ The planned surface is intentionally bounded:
 A module is added only when its first useful operations are implemented; empty
 placeholder modules are not part of the library.
 
+Current bundled modules:
+
+| Module | Functions |
+| --- | --- |
+| `std_collection` | `Length(List) -> Int`, `Sum(List) -> Number`, `Reverse(List) -> List`, `IsEmpty(List) -> Bool` |
+
 ## Compatibility
 
 During Terra v0, additions should be incremental and existing names should not

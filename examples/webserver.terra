@@ -1,0 +1,62 @@
+-- A deliberately tiny OTP-backed webserver example.
+-- Run it from the repository root, then visit http://127.0.0.1:8080/index.html.
+
+extern Tuple erlang.application.ensure_all_started(Atom app);
+extern Tuple erlang.inets.start(Atom service, List options);
+extern Atom erlang.inets.stop(Atom service, PID server);
+extern PID erlang.erlang.element(Int index, Tuple value);
+extern List erlang.erlang.binary_to_list(String value);
+
+function List Text(String value) {
+    return erlang.erlang.binary_to_list(value);
+}
+
+function Tuple StartHttpd(Int port, String document_root) {
+    local Tuple runtime = erlang.application.ensure_all_started(:inets);
+    println("inets runtime: ", runtime);
+
+    local List options = [
+        (:port, port),
+        (:server_name, Text("terra")),
+        (:server_root, Text(".")),
+        (:document_root, Text(document_root)),
+        (:bind_address, Text("127.0.0.1")),
+        (:modules, [:mod_alias]),
+        (:directory_index, [Text("index.html")]),
+        (:mime_types, [
+            (Text("html"), Text("text/html")),
+            (Text("txt"), Text("text/plain"))
+        ])
+    ];
+
+    return erlang.inets.start(:httpd, options);
+}
+
+function PID ServerPid(Tuple start_result) {
+    return erlang.erlang.element(2, start_result);
+}
+
+function Atom StopHttpd(PID server) {
+    return erlang.inets.stop(:httpd, server);
+}
+
+function strict *SInt Main(*String Args) {
+    println("launch args: ", Args.*);
+
+    local Tuple started = StartHttpd(8080, "examples/web");
+    local PID server = ServerPid(started);
+
+    println("serving examples/web on http://127.0.0.1:8080/index.html");
+    println("send this process the atom :stop to stop cleanly, or press Ctrl+C");
+
+    local Atom command = receive(Atom);
+    if command == :stop {
+        local Atom stopped = try StopHttpd(server);
+        if stopped == :ok {
+            return *SInt(0);
+        }
+        return *SInt(2);
+    }
+
+    return *SInt(1);
+}

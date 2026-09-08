@@ -697,7 +697,7 @@ load_imports([], _SourcePath, _Stack, ImportAcc, SignatureAcc) ->
     {ok, lists:reverse(ImportAcc), lists:reverse(SignatureAcc)};
 load_imports([#{name := Name} = Import | Rest], SourcePath, Stack,
              ImportAcc, SignatureAcc) ->
-    Path = filename:join(filename:dirname(SourcePath), Name ++ ".terra"),
+    Path = resolve_import_path(Name, SourcePath),
     case parse_for_import(Path, Stack) of
         {ok, ImportedProgram} ->
             Exports = maps:get(exports, ImportedProgram, []),
@@ -706,6 +706,21 @@ load_imports([#{name := Name} = Import | Rest], SourcePath, Stack,
             load_imports(Rest, SourcePath, Stack, [Import#{path => Path} | ImportAcc],
                          NewSignatures ++ SignatureAcc);
         Error -> Error
+    end.
+
+resolve_import_path(Name, SourcePath) ->
+    case lists:prefix("std_", Name) of
+        true -> standard_library_path(Name);
+        false -> filename:join(filename:dirname(SourcePath), Name ++ ".terra")
+    end.
+
+standard_library_path(Name) ->
+    FileName = Name ++ ".terra",
+    case code:which(?MODULE) of
+        BeamPath when is_list(BeamPath) ->
+            filename:join([filename:dirname(filename:dirname(BeamPath)), "std", FileName]);
+        _ ->
+            filename:join("std", FileName)
     end.
 
 imported_function_signatures(ModuleName, Exports, Functions) ->

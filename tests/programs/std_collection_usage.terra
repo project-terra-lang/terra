@@ -1,0 +1,13 @@
+import std_collection;
+
+function strict *SInt Main(*String Args) {
+    local List values = [1, 2, 3];
+    local Int count = std_collection.Length(values);
+    local Number total = std_collection.Sum(values);
+    local List reversed = std_collection.Reverse(values);
+    if std_collection.IsEmpty(reversed) {
+        return *SInt(1);
+    }
+    stdout(Args.*, count, total, reversed);
+    return *SInt(count + total);
+}

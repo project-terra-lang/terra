@@ -1,0 +1,40 @@
+extern Tuple erlang.application.ensure_all_started(Atom app);
+extern Tuple erlang.inets.start(Atom service, List options);
+extern Atom erlang.inets.stop(Atom service, PID server);
+extern PID erlang.erlang.element(Int index, Tuple value);
+extern List erlang.erlang.binary_to_list(String value);
+
+function List Text(String value) {
+    return erlang.erlang.binary_to_list(value);
+}
+
+function Tuple StartHttpd(Int port, String document_root) {
+    local Tuple runtime = erlang.application.ensure_all_started(:inets);
+    stdout(runtime);
+
+    local List options = [
+        (:port, port),
+        (:server_name, Text("terra")),
+        (:server_root, Text(".")),
+        (:document_root, Text(document_root)),
+        (:bind_address, Text("127.0.0.1")),
+        (:modules, [:mod_alias]),
+        (:directory_index, [Text("index.html")]),
+        (:mime_types, [(Text("html"), Text("text/html"))])
+    ];
+
+    return erlang.inets.start(:httpd, options);
+}
+
+function PID ServerPid(Tuple start_result) {
+    return erlang.erlang.element(2, start_result);
+}
+
+function Atom StopHttpd(PID server) {
+    return erlang.inets.stop(:httpd, server);
+}
+
+function strict *SInt Main(*String Args) {
+    stdout(Args.*);
+    return *SInt(0);
+}

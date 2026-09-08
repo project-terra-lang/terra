@@ -27,7 +27,9 @@ main(_Args) ->
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_imports_exports(OutDir),
+               test_std_collection(OutDir),
                test_erlang_ffi(OutDir),
+               test_webserver_ffi(OutDir),
                test_otp_library_first(OutDir),
                test_erlang_term_mapping(OutDir),
                test_erlang_return_validation(OutDir),
@@ -614,6 +616,25 @@ test_imports_exports(OutDir) ->
             fail
     end.
 
+test_std_collection(OutDir) ->
+    Path = "tests/programs/std_collection_usage.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "Ada", OutDir)} of
+        {{ok, terra_std_collection_usage, Source},
+         {ok, terra_std_collection_usage, 9, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            LibBeam = filename:join(OutDir, "terra_std_collection.beam"),
+            ErlangLength = apply(terra_std_collection, 'Length', [[1, 2, 3]]),
+            ErlangReverse = apply(terra_std_collection, 'Reverse', [[1, 2, 3]]),
+            expect("standard library collection module",
+                   contains(Binary, <<"terra_std_collection:terra_fn_length">>) andalso
+                   filelib:is_file(LibBeam) andalso
+                   ErlangLength == 3 andalso
+                   ErlangReverse == [3, 2, 1]);
+        Other ->
+            io:format("not ok - standard library collection module~n  got: ~p~n", [Other]),
+            fail
+    end.
+
 erlang_export_error(Fun) ->
     try Fun() of
         _Value -> no_error
@@ -631,6 +652,21 @@ test_erlang_ffi(OutDir) ->
                             <<"terra_ffi_return(number, lists, sum, lists:sum(">>));
         Other ->
             io:format("not ok - selected Erlang FFI call~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_webserver_ffi(OutDir) ->
+    Path = "tests/programs/webserver_ffi.terra",
+    case transpiler:compile_file(Path, OutDir) of
+        {ok, terra_webserver_ffi, _BeamPath, ErlangPath} ->
+            {ok, Source} = file:read_file(ErlangPath),
+            expect("webserver example compiles Erlang FFI",
+                   contains(Source, <<"application:ensure_all_started(inets)">>) andalso
+                   contains(Source, <<"inets:start(httpd,">>) andalso
+                   contains(Source, <<"inets:stop(httpd,">>));
+        Other ->
+            io:format("not ok - webserver example compiles Erlang FFI~n  got: ~p~n",
+                      [Other]),
             fail
     end.
 

@@ -1,0 +1,10 @@
+import std_collection;
+
+function strict *SInt Main(*String Args) {
+    local List values = [1, 2, 3];
+    println("values: ", values);
+    println("reversed: ", std_collection.Reverse(values));
+    println(format("count={} sum={}", std_collection.Length(values), std_collection.Sum(values)));
+    println("args empty: ", std_collection.IsEmpty(Args.*));
+    return *SInt(std_collection.Length(values));
+}

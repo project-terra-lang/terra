@@ -36,10 +36,12 @@ function strict *SInt Main(*String Args) {
 }
 ```
 
-`import math_lib;` resolves only to a sibling file named `math_lib.terra`; there
-is no package manager, version solving, or search path. Imported files are
-checked as library modules, so they may omit `Main`. A library must explicitly
-export any function another module should call:
+`import math_lib;` resolves to a sibling file named `math_lib.terra`; ordinary
+modules have no package manager, version solving, or search path. Imports whose
+name starts with the reserved `std_` prefix resolve to bundled standard-library
+files such as `std/std_collection.terra`. Imported files are checked as library
+modules, so they may omit `Main`. A library must explicitly export any function
+another module should call:
 
 ```terra
 export Add;
@@ -139,6 +141,21 @@ use PascalCase, such as `std_string.Trim(value)`. The library adds no implicit
 prelude, hidden import-time state, or alternate runtime. Its maintained scope,
 naming, admission, and compatibility rules are documented in
 `docs/standard-library-policy.md`.
+
+The current bundled module is `std_collection`:
+
+```terra
+import std_collection;
+
+local List values = [1, 2, 3];
+local Int count = std_collection.Length(values);
+local Number total = std_collection.Sum(values);
+local List reversed = std_collection.Reverse(values);
+local Bool empty = std_collection.IsEmpty(values);
+```
+
+It is implemented as an ordinary Terra library file using checked Erlang FFI
+declarations for the thin BEAM wrappers.
 
 ### Process primitives
 

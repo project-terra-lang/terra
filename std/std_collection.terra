@@ -1,0 +1,24 @@
+extern Int erlang.erlang.length(List values);
+extern Number erlang.lists.sum(List values);
+extern List erlang.lists.reverse(List values);
+
+export Length;
+export Sum;
+export Reverse;
+export IsEmpty;
+
+function Int Length(List values) {
+    return erlang.erlang.length(values);
+}
+
+function Number Sum(List values) {
+    return erlang.lists.sum(values);
+}
+
+function List Reverse(List values) {
+    return erlang.lists.reverse(values);
+}
+
+function Bool IsEmpty(List values) {
+    return Length(values) == 0;
+}

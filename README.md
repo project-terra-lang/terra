@@ -76,7 +76,9 @@ function strict *SInt Main(*String Args) {
 ```
 
 An import named `math_lib` resolves to `math_lib.terra` in the same directory.
-Imported functions must be explicitly exported by the imported module:
+Imports whose name starts with the reserved `std_` prefix resolve to bundled
+standard-library files, such as `std/std_collection.terra`. Imported functions
+must be explicitly exported by the imported module:
 
 ```terra
 export Add;
@@ -173,6 +175,27 @@ implicit prelude beyond core helpers, and broad frameworks remain outside the
 standard library. The complete admission, naming, module, testing, and v0
 compatibility rules are in
 [docs/standard-library-policy.md](docs/standard-library-policy.md).
+
+The first bundled module is `std_collection`, an ordinary Terra file backed by
+checked Erlang FFI wrappers:
+
+```terra
+import std_collection;
+
+function strict *SInt Main(*String Args) {
+    local List values = [1, 2, 3];
+    println(format("count={} sum={}",
+                   std_collection.Length(values),
+                   std_collection.Sum(values)));
+    println("reversed: ", std_collection.Reverse(values));
+    return *SInt(std_collection.Length(values));
+}
+```
+
+`std_collection.Length(List) -> Int`, `Sum(List) -> Number`,
+`Reverse(List) -> List`, and `IsEmpty(List) -> Bool` are implemented in
+`std/std_collection.terra` using ordinary `extern` declarations and exported
+Terra functions.
 
 ## Types
 
