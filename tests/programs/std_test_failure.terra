@@ -1,0 +1,7 @@
+import std_test;
+
+function strict *SInt Main(*String Args) {
+    local Atom ok = std_test.EqualString(Args.*, "expected", "argument mismatch");
+    stdout(ok);
+    return *SInt(0);
+}

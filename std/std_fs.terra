@@ -1,0 +1,13 @@
+extern Bool erlang.filelib.is_file(String path);
+extern Bool erlang.filelib.is_dir(String path);
+
+export IsFile;
+export IsDir;
+
+function Bool IsFile(String path) {
+    return erlang.filelib.is_file(path);
+}
+
+function Bool IsDir(String path) {
+    return erlang.filelib.is_dir(path);
+}

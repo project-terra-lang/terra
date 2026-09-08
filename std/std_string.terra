@@ -1,0 +1,25 @@
+extern Int erlang.erlang.byte_size(String value);
+extern String erlang.string.trim(String value);
+extern String erlang.string.uppercase(String value);
+extern String erlang.string.lowercase(String value);
+
+export ByteSize;
+export Trim;
+export Uppercase;
+export Lowercase;
+
+function Int ByteSize(String value) {
+    return erlang.erlang.byte_size(value);
+}
+
+function String Trim(String value) {
+    return erlang.string.trim(value);
+}
+
+function String Uppercase(String value) {
+    return erlang.string.uppercase(value);
+}
+
+function String Lowercase(String value) {
+    return erlang.string.lowercase(value);
+}

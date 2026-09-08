@@ -1,0 +1,63 @@
+extern Atom erlang.erlang.error(Tuple reason);
+
+export Assert;
+export Refute;
+export EqualInt;
+export EqualSInt;
+export EqualNumber;
+export EqualFloat;
+export EqualString;
+export EqualBinary;
+export EqualAtom;
+export EqualBool;
+
+function Atom Assert(Bool condition, String message) {
+    if condition {
+        return :ok;
+    }
+    return erlang.erlang.error((:assertion_failed, message));
+}
+
+function Atom Refute(Bool condition, String message) {
+    return Assert(!condition, message);
+}
+
+function Atom EqualInt(Int actual, Int expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}
+
+function Atom EqualSInt(SInt actual, SInt expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}
+
+function Atom EqualNumber(Number actual, Number expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}
+
+function Atom EqualFloat(Float actual, Float expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}
+
+function Atom EqualString(String actual, String expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}
+
+function Atom EqualBinary(Binary actual, Binary expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}
+
+function Atom EqualAtom(Atom actual, Atom expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}
+
+function Atom EqualBool(Bool actual, Bool expected, String message) {
+    return Assert(actual == expected,
+                  format("{} actual={} expected={}", message, actual, expected));
+}

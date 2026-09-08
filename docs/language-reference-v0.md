@@ -142,20 +142,49 @@ prelude, hidden import-time state, or alternate runtime. Its maintained scope,
 naming, admission, and compatibility rules are documented in
 `docs/standard-library-policy.md`.
 
-The current bundled module is `std_collection`:
+Current bundled modules cover a small practical surface:
 
 ```terra
 import std_collection;
+import std_string;
+import std_binary;
+import std_time;
+import std_random;
+import std_fs;
+import std_test;
 
 local List values = [1, 2, 3];
 local Int count = std_collection.Length(values);
 local Number total = std_collection.Sum(values);
 local List reversed = std_collection.Reverse(values);
 local Bool empty = std_collection.IsEmpty(values);
+local String trimmed = std_string.Trim(" Terra ");
+local Binary bytes = to_binary(trimmed);
+local Int byte_count = std_binary.ByteSize(bytes);
+local SInt now = std_time.SystemMillisecond();
+local Int roll = std_random.Uniform(6);
+local Bool readme = std_fs.IsFile("README.md");
+local Atom ok = std_test.EqualString("Terra", "Terra", "name");
 ```
 
-It is implemented as an ordinary Terra library file using checked Erlang FFI
-declarations for the thin BEAM wrappers.
+The maintained functions are:
+
+| Module | Functions |
+| --- | --- |
+| `std_collection` | `Length(List) -> Int`, `Sum(List) -> Number`, `Reverse(List) -> List`, `IsEmpty(List) -> Bool` |
+| `std_string` | `ByteSize(String) -> Int`, `Trim(String) -> String`, `Uppercase(String) -> String`, `Lowercase(String) -> String` |
+| `std_binary` | `ByteSize(Binary) -> Int`, `IsEmpty(Binary) -> Bool` |
+| `std_time` | `MonotonicMillisecond() -> SInt`, `SystemMillisecond() -> SInt` |
+| `std_random` | `Uniform(Int) -> Int` |
+| `std_fs` | `IsFile(String) -> Bool`, `IsDir(String) -> Bool` |
+| `std_test` | `Assert(Bool, String) -> Atom`, `Refute(Bool, String) -> Atom`, typed `Equal...` helpers for `Int`, `SInt`, `Number`, `Float`, `String`, `Binary`, `Atom`, and `Bool` |
+
+They are implemented as ordinary Terra library files using checked Erlang FFI
+declarations for thin BEAM wrappers where useful. `std_random.Uniform(limit)`
+returns an integer from `1` through `limit`, following Erlang's
+`rand:uniform/1` contract.
+`std_test` assertions return `:ok` on success and raise
+`{:assertion_failed, Message}` on failure.
 
 ### Process primitives
 
@@ -209,6 +238,13 @@ declaration order, and BEAM compilation uses Erlang's deterministic mode.
 Whitespace separates tokens and has no meaning outside strings and character
 literals. Line comments start with `--` or `//` and continue to the end of the
 line.
+
+`terra fmt <file.terra>` rewrites valid source in place using the compiler's
+canonical layout: four-space indentation, spaced binary operators, normalized
+declarations, block braces on the same line as the header, and one final
+newline. `terra fmt --check <file.terra>` exits successfully only when the
+source already matches that output. The v0 formatter is AST-based and does not
+preserve comments.
 
 Identifiers begin with a letter or underscore and may contain letters, digits,
 and underscores. Keywords are reserved.

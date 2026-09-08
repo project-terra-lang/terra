@@ -84,6 +84,12 @@ Current bundled modules:
 | Module | Functions |
 | --- | --- |
 | `std_collection` | `Length(List) -> Int`, `Sum(List) -> Number`, `Reverse(List) -> List`, `IsEmpty(List) -> Bool` |
+| `std_string` | `ByteSize(String) -> Int`, `Trim(String) -> String`, `Uppercase(String) -> String`, `Lowercase(String) -> String` |
+| `std_binary` | `ByteSize(Binary) -> Int`, `IsEmpty(Binary) -> Bool` |
+| `std_time` | `MonotonicMillisecond() -> SInt`, `SystemMillisecond() -> SInt` |
+| `std_random` | `Uniform(Int) -> Int` |
+| `std_fs` | `IsFile(String) -> Bool`, `IsDir(String) -> Bool` |
+| `std_test` | `Assert(Bool, String) -> Atom`, `Refute(Bool, String) -> Atom`, typed equality helpers for `Int`, `SInt`, `Number`, `Float`, `String`, `Binary`, `Atom`, and `Bool` |
 
 ## Compatibility
 

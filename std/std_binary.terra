@@ -1,0 +1,12 @@
+extern Int erlang.erlang.byte_size(Binary value);
+
+export ByteSize;
+export IsEmpty;
+
+function Int ByteSize(Binary value) {
+    return erlang.erlang.byte_size(value);
+}
+
+function Bool IsEmpty(Binary value) {
+    return ByteSize(value) == 0;
+}

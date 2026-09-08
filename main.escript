@@ -32,6 +32,10 @@ run(["ast", Path]) ->
     print_ast(Path);
 run(["explain", Path]) ->
     explain_file(Path);
+run(["fmt", "--check", Path]) ->
+    fmt_check_file(Path);
+run(["fmt", Path]) ->
+    fmt_file(Path);
 run(["emit", Path]) ->
     emit_file(Path, default_erlang_path(Path));
 run(["emit", Path, OutputPath]) ->
@@ -57,6 +61,8 @@ print_help() ->
     io:format("  terra tokens <file.terra>   Print tokenizer output~n"),
     io:format("  terra ast <file.terra>      Print parsed program AST~n"),
     io:format("  terra explain <file.terra>  Explain how a program behaves~n"),
+    io:format("  terra fmt <file.terra>      Format a Terra file in place~n"),
+    io:format("  terra fmt --check <file>    Check whether a Terra file is formatted~n"),
     io:format("  terra emit <file.terra>     Generate Erlang source~n"),
     io:format("  terra build <file.terra>    Compile Erlang source to BEAM~n"),
     io:format("  terra run <file.terra> ...  Build and run Main on the BEAM VM~n"),
@@ -124,6 +130,26 @@ explain_file(Path) ->
     case program:parse_file(Path) of
         {ok, Program} ->
             io:put_chars(explainer:format(Program)),
+            ok;
+        {error, Reason} ->
+            print_error(Path, Reason),
+            halt(1)
+    end.
+
+fmt_file(Path) ->
+    case prettyprinter:write_formatted_file(Path) of
+        {ok, WrittenPath} ->
+            io:format("terra: formatted ~s~n", [WrittenPath]),
+            ok;
+        {error, Reason} ->
+            print_error(Path, Reason),
+            halt(1)
+    end.
+
+fmt_check_file(Path) ->
+    case prettyprinter:check_formatted_file(Path) of
+        ok ->
+            io:format("terra: ~s formatted~n", [Path]),
             ok;
         {error, Reason} ->
             print_error(Path, Reason),

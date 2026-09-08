@@ -510,6 +510,10 @@ format({runtime_error, Class, Reason, _Stacktrace}) ->
     {runtime_error,
      io_lib:format("The program stopped at runtime (~p): ~p.", [Class, Reason]),
      "Inspect the generated Erlang with terra emit and check the failing value."};
+format(not_formatted) ->
+    {not_formatted,
+     "This Terra source is not formatted.",
+     "Run terra fmt <file.terra> to rewrite it in the canonical style."};
 format({write_failed, Reason}) ->
     {write_failed,
      io_lib:format("I could not write the generated Erlang file: ~p.", [Reason]),

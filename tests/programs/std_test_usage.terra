@@ -1,0 +1,17 @@
+import std_test;
+
+function strict *SInt Main(*String Args) {
+    local Atom ok1 = std_test.Assert(Args.* == "pass", "expected pass argument");
+    local Atom ok2 = std_test.Refute(false, "false stays false");
+    local Atom ok3 = std_test.EqualInt(3, 3, "int equality");
+    local Atom ok4 = std_test.EqualSInt(-3, -3, "signed int equality");
+    local Atom ok5 = std_test.EqualNumber(3.5, 3.5, "number equality");
+    local Atom ok6 = std_test.EqualFloat(0.5, 0.5, "float equality");
+    local Atom ok7 = std_test.EqualString("Terra", "Terra", "string equality");
+    local Atom ok8 = std_test.EqualBinary(to_binary("Terra"), to_binary("Terra"), "binary equality");
+    local Atom ok9 = std_test.EqualAtom(:ready, :ready, "atom equality");
+    local Atom ok10 = std_test.EqualBool(true, true, "bool equality");
+    stdout(ok1, ok2, ok3, ok4, ok5, ok6, ok7, ok8, ok9, ok10);
+    println("std_test assertions passed");
+    return *SInt(0);
+}

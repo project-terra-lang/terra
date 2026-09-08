@@ -28,6 +28,8 @@ main(_Args) ->
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
                test_imports_exports(OutDir),
                test_std_collection(OutDir),
+               test_std_helpers(OutDir),
+               test_std_test(OutDir),
                test_erlang_ffi(OutDir),
                test_webserver_ffi(OutDir),
                test_otp_library_first(OutDir),
@@ -634,6 +636,59 @@ test_std_collection(OutDir) ->
             io:format("not ok - standard library collection module~n  got: ~p~n", [Other]),
             fail
     end.
+
+test_std_helpers(OutDir) ->
+    Path = "tests/programs/std_helpers_usage.terra",
+    case transpiler:run_file(Path, "Ada", OutDir) of
+        {ok, terra_std_helpers_usage, 5, _BeamPath, _ErlangPath} ->
+            StringBeam = filename:join(OutDir, "terra_std_string.beam"),
+            BinaryBeam = filename:join(OutDir, "terra_std_binary.beam"),
+            TimeBeam = filename:join(OutDir, "terra_std_time.beam"),
+            RandomBeam = filename:join(OutDir, "terra_std_random.beam"),
+            FsBeam = filename:join(OutDir, "terra_std_fs.beam"),
+            ErlangTrim = apply(terra_std_string, 'Trim', [<<" Terra ">>]),
+            ErlangUpper = apply(terra_std_string, 'Uppercase', [<<"terra">>]),
+            ErlangByteSize = apply(terra_std_binary, 'ByteSize', [<<"Terra">>]),
+            ErlangIsDir = apply(terra_std_fs, 'IsDir', [<<".">>]),
+            Roll = apply(terra_std_random, 'Uniform', [6]),
+            expect("standard library practical helper modules",
+                   filelib:is_file(StringBeam) andalso
+                   filelib:is_file(BinaryBeam) andalso
+                   filelib:is_file(TimeBeam) andalso
+                   filelib:is_file(RandomBeam) andalso
+                   filelib:is_file(FsBeam) andalso
+                   ErlangTrim == <<"Terra">> andalso
+                   ErlangUpper == <<"TERRA">> andalso
+                   ErlangByteSize == 5 andalso
+                   ErlangIsDir == true andalso
+                   Roll >= 1 andalso Roll =< 6);
+        Other ->
+            io:format("not ok - standard library practical helper modules~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_std_test(OutDir) ->
+    SuccessPath = "tests/programs/std_test_usage.terra",
+    FailurePath = "tests/programs/std_test_failure.terra",
+    Success = transpiler:run_file(SuccessPath, "pass", OutDir),
+    Failure = transpiler:run_file(FailurePath, "actual", OutDir),
+    StdTestBeam = filename:join(OutDir, "terra_std_test.beam"),
+    ErlangAssert = apply(terra_std_test, 'Assert', [true, <<"passes">>]),
+    ErlangFailure = erlang_export_error(
+                      fun() -> apply(terra_std_test, 'EqualInt',
+                                     [1, 2, <<"int mismatch">>]) end),
+    expect("standard library testing assertions",
+           Success == {ok, terra_std_test_usage, 0,
+                       filename:join(OutDir, "terra_std_test_usage.beam"),
+                       filename:join(OutDir, "terra_std_test_usage.erl")} andalso
+           is_runtime_reason(Failure,
+                             {assertion_failed,
+                              <<"argument mismatch actual=actual expected=expected">>}) andalso
+           filelib:is_file(StdTestBeam) andalso
+           ErlangAssert == ok andalso
+           ErlangFailure == {assertion_failed,
+                             <<"int mismatch actual=1 expected=2">>}).
 
 erlang_export_error(Fun) ->
     try Fun() of

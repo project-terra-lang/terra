@@ -1,0 +1,7 @@
+extern Int erlang.rand.uniform(Int limit);
+
+export Uniform;
+
+function Int Uniform(Int limit) {
+    return erlang.rand.uniform(limit);
+}

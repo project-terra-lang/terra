@@ -1,0 +1,33 @@
+import std_string;
+import std_binary;
+import std_time;
+import std_random;
+import std_fs;
+
+function strict *SInt Main(*String Args) {
+    local String cleaned = std_string.Trim(" Terra ");
+    local String loud = std_string.Uppercase(cleaned);
+    local String quiet = std_string.Lowercase(loud);
+    local Binary bytes = to_binary(cleaned);
+    local Int byte_count = std_binary.ByteSize(bytes);
+    local SInt started = std_time.MonotonicMillisecond();
+    local SInt now = std_time.SystemMillisecond();
+    local Int roll = std_random.Uniform(6);
+
+    println(format("args={} value={} bytes={} now={}",
+                   Args.*, quiet, byte_count, now));
+
+    if std_fs.IsFile("README.md") &&
+       std_fs.IsDir(".") &&
+       cleaned == "Terra" &&
+       quiet == "terra" &&
+       byte_count == std_string.ByteSize(cleaned) &&
+       std_binary.IsEmpty(to_binary("")) &&
+       roll >= 1 &&
+       roll <= 6 &&
+       started <= std_time.MonotonicMillisecond() {
+        return *SInt(byte_count);
+    }
+
+    return *SInt(1);
+}

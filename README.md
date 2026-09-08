@@ -176,26 +176,54 @@ standard library. The complete admission, naming, module, testing, and v0
 compatibility rules are in
 [docs/standard-library-policy.md](docs/standard-library-policy.md).
 
-The first bundled module is `std_collection`, an ordinary Terra file backed by
-checked Erlang FFI wrappers:
+Bundled modules are ordinary Terra files backed by checked Erlang FFI wrappers
+where useful:
 
 ```terra
 import std_collection;
+import std_string;
+import std_binary;
+import std_time;
+import std_random;
+import std_fs;
+import std_test;
 
 function strict *SInt Main(*String Args) {
     local List values = [1, 2, 3];
+    local String name = std_string.Trim(" Terra ");
+    local Binary bytes = to_binary(name);
     println(format("count={} sum={}",
                    std_collection.Length(values),
                    std_collection.Sum(values)));
     println("reversed: ", std_collection.Reverse(values));
+    println(format("name={} bytes={} now={}",
+                   std_string.Uppercase(name),
+                   std_binary.ByteSize(bytes),
+                   std_time.SystemMillisecond()));
+    println("readme present: ", std_fs.IsFile("README.md"));
+    local Atom ok = std_test.EqualInt(std_collection.Length(values), 3, "example count");
+    stdout(ok);
     return *SInt(std_collection.Length(values));
 }
 ```
 
-`std_collection.Length(List) -> Int`, `Sum(List) -> Number`,
-`Reverse(List) -> List`, and `IsEmpty(List) -> Bool` are implemented in
-`std/std_collection.terra` using ordinary `extern` declarations and exported
-Terra functions.
+Current modules include:
+
+| Module | Functions |
+| --- | --- |
+| `std_collection` | `Length(List) -> Int`, `Sum(List) -> Number`, `Reverse(List) -> List`, `IsEmpty(List) -> Bool` |
+| `std_string` | `ByteSize(String) -> Int`, `Trim(String) -> String`, `Uppercase(String) -> String`, `Lowercase(String) -> String` |
+| `std_binary` | `ByteSize(Binary) -> Int`, `IsEmpty(Binary) -> Bool` |
+| `std_time` | `MonotonicMillisecond() -> SInt`, `SystemMillisecond() -> SInt` |
+| `std_random` | `Uniform(Int) -> Int` |
+| `std_fs` | `IsFile(String) -> Bool`, `IsDir(String) -> Bool` |
+| `std_test` | `Assert(Bool, String) -> Atom`, `Refute(Bool, String) -> Atom`, typed `Equal...` helpers for `Int`, `SInt`, `Number`, `Float`, `String`, `Binary`, `Atom`, and `Bool` |
+
+`std_random.Uniform(limit)` follows Erlang's `rand:uniform/1` contract and
+returns an integer from `1` through `limit`.
+`std_test` helpers return `:ok` on success and raise
+`{:assertion_failed, Message}` on failure, so Terra test programs can use the
+same explicit runtime failure path as other checked helpers.
 
 ## Types
 
@@ -590,6 +618,8 @@ check <file>              Parse and type-check a Terra source file
 tokens <file>             Print tokenizer output
 ast <file>                Print the parsed abstract syntax tree
 explain <file>            Show inferred and declared program information
+fmt <file>                Format a Terra source file in place
+fmt --check <file>        Check whether a Terra source file is formatted
 emit <file> [output.erl]  Generate Erlang source
 build <file> [build-dir]  Generate and compile a BEAM module
 run <file> [args...]      Build and execute Main
@@ -602,6 +632,11 @@ Generated Erlang and BEAM files are written to the build directory. Diagnostics
 include stable error codes, source locations, contextual labels, suggestions,
 and generated Erlang-to-Terra source mapping where available. Builds are
 deterministic for the same source and compiler version.
+
+`terra fmt` is intentionally small and AST-based. It rewrites valid Terra
+source into the compiler's canonical style with four-space indentation, spaced
+operators, normalized declarations, and one final newline. This first formatter
+does not preserve comments.
 
 The examples directory contains focused programs for structs, enums, maps,
 loops, diagnostics, recursion, and the larger feature showcase.

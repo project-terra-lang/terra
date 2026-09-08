@@ -74,10 +74,12 @@ new features should arrive in small, understandable steps.
 
 - [x] Define a small standard-library policy and naming convention
 - [x] Add `print`, formatting, and basic console helpers on top of `stdout`
-- [ ] Add practical collection, string, binary, time, random, and filesystem helpers
+- [x] Add practical collection, string, binary, time, random, and filesystem helpers
       - [x] Start bundled `std_collection` with `Length`, `Sum`, `Reverse`, and `IsEmpty`
-- [ ] Add a tiny testing/assertion library for Terra programs
-- [ ] Add `terra fmt` after the syntax feels stable enough
+      - [x] Add `std_string`, `std_binary`, `std_time`, `std_random`, and `std_fs`
+            with small checked-FFI helper surfaces
+- [x] Add a tiny testing/assertion library for Terra programs
+- [x] Add `terra fmt` after the syntax feels stable enough
 - [ ] Improve `terra explain` with inferred types and clearer control-flow notes
 - [ ] Keep editor/tooling work minimal until the language stops changing quickly
 

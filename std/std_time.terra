@@ -1,0 +1,13 @@
+extern SInt erlang.erlang.monotonic_time(Atom unit);
+extern SInt erlang.erlang.system_time(Atom unit);
+
+export MonotonicMillisecond;
+export SystemMillisecond;
+
+function SInt MonotonicMillisecond() {
+    return erlang.erlang.monotonic_time(:millisecond);
+}
+
+function SInt SystemMillisecond() {
+    return erlang.erlang.system_time(:millisecond);
+}
