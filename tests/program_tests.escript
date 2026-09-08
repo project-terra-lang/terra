@@ -92,6 +92,14 @@ main(_Args) ->
              {"conversion helper scalar type",
               "tests/programs/conversion_bad_to_string.terra",
               fun expect_conversion_bad_to_string/1},
+             {"console and formatting helpers", "examples/console_helpers.terra",
+              fun expect_console_helpers/1},
+             {"format requires a String template",
+              "tests/programs/format_bad_argument.terra",
+              fun expect_format_bad_argument/1},
+             {"format requires a template",
+              "tests/programs/format_missing_template.terra",
+              fun expect_format_missing_template/1},
              {"once-only calls require zero arguments",
               "tests/programs/once_requires_zero_args.terra",
               fun expect_once_requires_zero_args/1},
@@ -722,6 +730,28 @@ expect_conversion_bad_to_string(
            {invalid_conversion_argument, "to_string", map}}}) -> true;
 expect_conversion_bad_to_string(_) ->
     false.
+
+expect_console_helpers({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    [Message, Print, Println, _ArgsLine, Eprint, Eprintln, Blank, _Return] =
+        maps:get(statements, Main),
+    maps:get(value, Message) ==
+        {call, "format", [{string, <<"name={} score={} braces={{ok}}">>},
+                           {string, <<"Ada">>}, {int, 7}]} andalso
+    [maps:get(name, Statement) || Statement <-
+        [Print, Println, Eprint, Eprintln, Blank]] ==
+        ["print", "println", "eprint", "eprintln", "println"] andalso
+    maps:get(warnings, Program) == [];
+expect_console_helpers(_) -> false.
+
+expect_format_bad_argument(
+  {error, {in_function, "Main",
+           {argument_type_mismatch, "format", [string], [int]}}}) -> true;
+expect_format_bad_argument(_) -> false.
+
+expect_format_missing_template(
+  {error, {in_function, "Main", {console_helper_arity, "format", 1, 0}}}) -> true;
+expect_format_missing_template(_) -> false.
 
 expect_pointers({ok, Program}) ->
     maps:get(region_capacity, Program) == {fixed, 4};

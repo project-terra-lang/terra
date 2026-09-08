@@ -72,8 +72,8 @@ new features should arrive in small, understandable steps.
 
 ## Milestone 5: Tiny Standard Library and Tooling
 
-- [ ] Define a small standard-library policy and naming convention
-- [ ] Add `print`, formatting, and basic console helpers on top of `stdout`
+- [x] Define a small standard-library policy and naming convention
+- [x] Add `print`, formatting, and basic console helpers on top of `stdout`
 - [ ] Add practical collection, string, binary, time, random, and filesystem helpers
 - [ ] Add a tiny testing/assertion library for Terra programs
 - [ ] Add `terra fmt` after the syntax feels stable enough

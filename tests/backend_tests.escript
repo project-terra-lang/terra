@@ -15,6 +15,7 @@ main(_Args) ->
                test_once_reentrancy(OutDir),
                test_storage_semantics(OutDir), test_computed_deferred(OutDir),
                test_conversions(OutDir), test_conversion_bad_string(OutDir),
+               test_console_helpers(OutDir), test_format_failures(OutDir),
                test_restricted_map(OutDir),
                test_immutable_updates(OutDir), test_restricted_map_update_overflow(OutDir),
                test_records(OutDir),
@@ -390,6 +391,34 @@ test_conversion_bad_string(OutDir) ->
     expect("string parse failures are explicit",
            is_runtime_reason(Result, {invalid_conversion, string, int,
                                       <<"not-a-number">>})).
+
+test_console_helpers(OutDir) ->
+    Path = "examples/console_helpers.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "terra", OutDir)} of
+        {{ok, terra_console_helpers, Source},
+         {ok, terra_console_helpers, 0, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("console and formatting helpers run on BEAM",
+                   contains(Binary, <<"terra_console_print(standard_io, false">>) andalso
+                   contains(Binary, <<"terra_console_print(standard_error, true">>) andalso
+                   contains(Binary, <<"terra_format(">>) andalso
+                   contains(Binary, <<"invalid_format_template">>) andalso
+                   contains(Binary, <<"format_arity">>));
+        Other ->
+            io:format("not ok - console and formatting helpers run on BEAM~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_format_failures(OutDir) ->
+    ArityResult = transpiler:run_file("tests/programs/format_bad_arity.terra",
+                                     "", OutDir),
+    TemplateResult = transpiler:run_file("tests/programs/format_bad_template.terra",
+                                        "", OutDir),
+    expect("format failures are explicit",
+           is_runtime_reason(ArityResult, {format_arity, 2, 1}) andalso
+           is_runtime_reason(TemplateResult,
+                             {invalid_format_template, <<"unclosed {">>})).
 
 test_restricted_map(OutDir) ->
     Path = "tests/programs/restricted_map.terra",

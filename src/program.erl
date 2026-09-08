@@ -2205,6 +2205,25 @@ validate_call(stdout, Args, Sigs, Env) ->
         {ok, _} -> {ok, []};
         Error -> Error
     end;
+validate_call(Name, Args, Sigs, Env)
+  when Name == "print"; Name == "println"; Name == "eprint"; Name == "eprintln" ->
+    case expression_types(Args, Sigs, Env, []) of
+        {ok, _} -> {ok, [atom]};
+        Error -> Error
+    end;
+validate_call("format", [], _Sigs, _Env) ->
+    {error, {console_helper_arity, "format", 1, 0}};
+validate_call("format", [Template | Values], Sigs, Env) ->
+    case single_type(Template, Sigs, Env) of
+        {ok, string} ->
+            case expression_types(Values, Sigs, Env, []) of
+                {ok, _} -> {ok, [string]};
+                Error -> Error
+            end;
+        {ok, Actual} ->
+            {error, {argument_type_mismatch, "format", [string], [Actual]}};
+        Error -> Error
+    end;
 validate_call(range, Args, Sigs, Env) -> validate_range(Args, Sigs, Env);
 validate_call(restricted_map, Args, Sigs, Env) ->
     validate_restricted_map(Args, Sigs, Env);

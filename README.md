@@ -158,6 +158,22 @@ complete decision rule is recorded in
 checked-FFI example in
 [examples/otp_library_first.terra](examples/otp_library_first.terra).
 
+## Standard Library Policy
+
+Terra's standard library is intentionally tiny. Compiler-backed core helpers
+use lowercase `snake_case` and require no import. Ordinary bundled modules are
+explicitly imported, use the reserved `std_` prefix with lowercase
+`snake_case` names, and expose PascalCase functions, for example
+`std_string.Trim(value)`.
+
+Library additions must cover common work, have concise typed semantics, compose
+with immutable values and explicit failure propagation, and remain thin Terra
+or Erlang/OTP wrappers whenever compiler support is unnecessary. There is no
+implicit prelude beyond core helpers, and broad frameworks remain outside the
+standard library. The complete admission, naming, module, testing, and v0
+compatibility rules are in
+[docs/standard-library-policy.md](docs/standard-library-policy.md).
+
 ## Types
 
 Terra currently supports:
@@ -204,6 +220,25 @@ local Binary bytes = to_binary(:ready);
 input and fail explicitly on invalid text. `to_binary` returns arbitrary BEAM
 bytes as `Binary`; `to_string` returns UTF-8 `String` and accepts `Binary` only
 when its bytes are valid UTF-8.
+
+Console helpers provide compact output and simple interpolation:
+
+```terra
+print("score: ");
+println(42);
+eprintln("could not load save data");
+local String message = format("player={} score={} braces={{ok}}", "Ada", 42);
+```
+
+`print` and `eprint` write to standard output and standard error without a
+newline. `println` and `eprintln` append one newline; calling either with no
+arguments writes a blank line. Arguments are concatenated in order and each
+helper returns `:ok`. `format` replaces each `{}` from left to right and returns
+a `String`; `{{` and `}}` produce literal braces. A malformed template or a
+placeholder/value count mismatch fails explicitly. Strings print as text,
+scalars use their ordinary spelling, and compound values use readable BEAM term
+formatting. `stdout(...)` remains available and continues to print each argument
+on its own line.
 
 `PID` and `Reference` are opaque, immutable BEAM values. They have no type
 constructor; `self()` and `spawn(...)` produce PIDs, while typed FFI calls can

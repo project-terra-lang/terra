@@ -130,6 +130,16 @@ ordinary OTP APIs. Terra does not currently add syntax for supervisors,
 applications, releases, or OTP behaviors. See
 `docs/otp-integration-policy.md` for the maintained decision criteria.
 
+### Standard-library boundary
+
+Core compiler-backed helpers use lowercase `snake_case` and are available
+without imports. Bundled library modules are explicit imports whose names use
+the reserved `std_` prefix and lowercase `snake_case`; their public functions
+use PascalCase, such as `std_string.Trim(value)`. The library adds no implicit
+prelude, hidden import-time state, or alternate runtime. Its maintained scope,
+naming, admission, and compatibility rules are documented in
+`docs/standard-library-policy.md`.
+
 ### Process primitives
 
 Terra has four built-in process operations:
@@ -687,6 +697,37 @@ Statements after a guaranteed return are rejected as unreachable code.
 stdout("hello");
 stdout(value);
 ```
+
+The core console helpers provide compact standard-output and standard-error
+writing:
+
+```terra
+print("score: ");
+println(42);
+eprint("warning: ");
+eprintln(:retrying);
+println();
+```
+
+`print` and `eprint` concatenate their arguments without a newline. `println`
+and `eprintln` append one newline, including when called without arguments. All
+four accept zero or more values and return the atom `:ok`. Strings are emitted
+as UTF-8 text, scalar values use their ordinary spelling, and other values use
+readable BEAM term formatting. Invalid UTF-8 binaries use BEAM term formatting
+instead of being emitted as text.
+
+`format(template, values...)` returns a `String` without writing it. Each `{}`
+placeholder consumes one value from left to right; `{{` and `}}` escape literal
+braces:
+
+```terra
+local String line = format("name={} score={} braces={{ok}}", "Ada", 42);
+```
+
+The first argument must be `String`. A different placeholder/value count raises
+`{format_arity, Expected, Actual}`. An unmatched or unescaped brace raises
+`{invalid_format_template, Template}`. Both failures compose with `try` and
+pipeline propagation like other checked helper failures.
 
 ### Conditions
 

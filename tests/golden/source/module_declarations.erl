@@ -84,6 +84,55 @@ terra_stdout(Values) ->
 terra_stdout_value(Value) when is_binary(Value) -> io:format("~ts~n", [Value]);
 terra_stdout_value(Value) -> io:format("~tp~n", [Value]).
 
+terra_console_print(Device, Newline, Values) ->
+    io:put_chars(Device, [terra_console_value(Value) || Value <- Values]),
+    case Newline of true -> io:nl(Device); false -> ok end,
+    ok.
+
+terra_console_value(Value) when is_binary(Value) ->
+    case unicode:characters_to_binary(Value) of
+        Value -> Value;
+        _ -> io_lib:format("~tp", [Value])
+    end;
+terra_console_value(Value) when is_integer(Value) -> integer_to_binary(Value);
+terra_console_value(Value) when is_float(Value) -> float_to_binary(Value, [short]);
+terra_console_value(Value) when is_atom(Value) -> atom_to_binary(Value, utf8);
+terra_console_value(Value) -> io_lib:format("~tp", [Value]).
+
+terra_format(Template, Values) when is_binary(Template) ->
+    Characters = binary_to_list(Template),
+    Expected = terra_format_placeholder_count(Characters, Template, 0),
+    Actual = length(Values),
+    case Expected =:= Actual of
+        true -> iolist_to_binary(lists:reverse(
+                    terra_format_parts(Characters, Values, [])));
+        false -> erlang:error({format_arity, Expected, Actual})
+    end.
+
+terra_format_placeholder_count([], _Template, Count) -> Count;
+terra_format_placeholder_count([123, 123 | Rest], Template, Count) ->
+    terra_format_placeholder_count(Rest, Template, Count);
+terra_format_placeholder_count([125, 125 | Rest], Template, Count) ->
+    terra_format_placeholder_count(Rest, Template, Count);
+terra_format_placeholder_count([123, 125 | Rest], Template, Count) ->
+    terra_format_placeholder_count(Rest, Template, Count + 1);
+terra_format_placeholder_count([123 | _], Template, _Count) ->
+    erlang:error({invalid_format_template, Template});
+terra_format_placeholder_count([125 | _], Template, _Count) ->
+    erlang:error({invalid_format_template, Template});
+terra_format_placeholder_count([_ | Rest], Template, Count) ->
+    terra_format_placeholder_count(Rest, Template, Count).
+
+terra_format_parts([], [], Acc) -> Acc;
+terra_format_parts([123, 123 | Rest], Values, Acc) ->
+    terra_format_parts(Rest, Values, [123 | Acc]);
+terra_format_parts([125, 125 | Rest], Values, Acc) ->
+    terra_format_parts(Rest, Values, [125 | Acc]);
+terra_format_parts([123, 125 | Rest], [Value | Values], Acc) ->
+    terra_format_parts(Rest, Values, [terra_console_value(Value) | Acc]);
+terra_format_parts([Character | Rest], Values, Acc) ->
+    terra_format_parts(Rest, Values, [Character | Acc]).
+
 terra_to_int(Value) when is_integer(Value) -> Value;
 terra_to_int(Value) when is_float(Value) -> trunc(Value).
 

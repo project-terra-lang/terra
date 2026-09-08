@@ -1,0 +1,4 @@
+function strict *SInt Main(*String Args) {
+    println(format("unclosed {", "value"));
+    return *SInt(0);
+}

@@ -1,0 +1,11 @@
+-- Small console and formatting helpers built on BEAM IO.
+function strict *SInt Main(*String Args) {
+    local String message = format("name={} score={} braces={{ok}}", "Ada", 7);
+    print("prefix:");
+    println(message);
+    println(format("args={}", Args.*));
+    eprint("status:");
+    eprintln(:ready);
+    println();
+    return *SInt(0);
+}

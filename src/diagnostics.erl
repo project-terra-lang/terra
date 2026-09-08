@@ -368,6 +368,11 @@ format({conversion_arity, Name, Expected, Actual}) ->
      io_lib:format("Conversion helper ~s expects ~p argument, but received ~p.",
                    [Name, Expected, Actual]),
      "Pass the helper the documented number of values."};
+format({console_helper_arity, Name, Expected, Actual}) ->
+    {console_helper_arity,
+     io_lib:format("Console helper ~s expects at least ~p argument, but received ~p.",
+                   [Name, Expected, Actual]),
+     "Pass format a String template followed by zero or more replacement values."};
 format({invalid_conversion_argument, Name, Type}) ->
     {invalid_conversion_argument,
      io_lib:format("Conversion helper ~s does not accept ~s.",

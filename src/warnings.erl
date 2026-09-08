@@ -24,7 +24,7 @@ analyze_statement(#{kind := multi_binding, bindings := Bindings, value := Value}
     end, analyze_expr(Value, State), Bindings);
 analyze_statement(#{kind := call, name := Name, args := Args}, State) ->
     State1 = analyze_exprs(Args, State),
-    case is_list(Name) andalso Name =/= "send" of
+    case is_list(Name) andalso not effect_call(Name) of
         true -> add_warning(ignored_return_value, #{callee => Name}, State1);
         false -> State1
     end;
@@ -155,3 +155,10 @@ add_warning(Code, Fields, State) ->
     Warning = maps:merge(#{severity => warning, code => Code,
                            function => maps:get(function, State)}, Fields),
     State#{warnings := maps:get(warnings, State) ++ [Warning]}.
+
+effect_call("send") -> true;
+effect_call("print") -> true;
+effect_call("println") -> true;
+effect_call("eprint") -> true;
+effect_call("eprintln") -> true;
+effect_call(_) -> false.

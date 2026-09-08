@@ -28,6 +28,9 @@ format_statements(Statements, FunctionName, Indent) ->
 
 format_statement(#{kind := call, name := stdout}, _FunctionName, Indent) ->
     [spaces(Indent), "- writes a value to the console with stdout\n"];
+format_statement(#{kind := call, name := Name}, _FunctionName, Indent)
+  when Name == "print"; Name == "println"; Name == "eprint"; Name == "eprintln" ->
+    [spaces(Indent), "- writes formatted values with ", Name, "\n"];
 format_statement(#{kind := call, name := Name, invocation := Invocation} = Statement,
                  FunctionName, Indent) ->
     Recursive = case display_name(Name) == FunctionName of

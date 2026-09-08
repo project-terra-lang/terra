@@ -1,0 +1,4 @@
+function strict *SInt Main(*String Args) {
+    local String message = format();
+    return *SInt(0);
+}
