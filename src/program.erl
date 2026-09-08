@@ -161,18 +161,34 @@ type_check_functions(Functions, Records, Enums, Signatures, Entry,
                          exports => maps:get(exports, Context, []),
                          externals => maps:get(externals, Context, []),
                          functions => ParsedFunctions},
-            RegionCapacity = case maps:get(region_config, Context, auto) of
-                                 auto -> {auto, count_pointer_allocations(Program0)};
-                                 Fixed -> Fixed
-                             end,
-            Program = Program0#{region_capacity => RegionCapacity},
-            case duplicate_global_name(Program) of
-                none ->
-                    {ok, Context#{program => Program}};
-                Name -> {error, {duplicate_global, Name}}
+            case region_capacity(maps:get(region_config, Context, auto), Entry,
+                                 Program0) of
+                {ok, RegionCapacity} ->
+                    Program = Program0#{region_capacity => RegionCapacity},
+                    case duplicate_global_name(Program) of
+                        none ->
+                            {ok, Context#{program => Program}};
+                        Name -> {error, {duplicate_global, Name}}
+                    end;
+                Error -> Error
             end;
         Error -> Error
     end.
+
+region_capacity(auto, Entry, Program) ->
+    EntrySlots = case Entry of none -> 0; _ -> 1 end,
+    Estimate = EntrySlots + count_pointer_allocations(Program),
+    case Estimate =< 65536 of
+        true -> {ok, {auto, Estimate, 65536}};
+        false -> {error, {automatic_region_too_large, Estimate, 65536}}
+    end;
+region_capacity({fixed, Capacity}, _Entry, _Program) when Capacity > 65536 ->
+    {error, {region_capacity_too_large, Capacity, 65536}};
+region_capacity({fixed, Capacity}, Entry, _Program)
+  when Entry =/= none, Capacity < 2 ->
+    {error, {region_capacity_too_small, Capacity, 2}};
+region_capacity({fixed, Capacity}, _Entry, _Program) ->
+    {ok, {fixed, Capacity}}.
 
 duplicate_global_name(Program) ->
     duplicate_name([#{name => Name} || Name <- global_names(Program)], []).
@@ -377,32 +393,16 @@ parse_record_body([{keyword, enum}, {id, Name}, {lbrace, "{"} | Rest],
                               add_user_types([Enum | NestedEnums], EnumAcc));
         Error -> Error
     end;
-parse_record_body([{keyword, Type}, {id, Name}, {endofline, ";"} | Rest],
-                  FieldAcc, RecordAcc, EnumAcc) ->
-    case is_type(Type) of
-        true -> parse_record_body(Rest, [#{type => Type, name => Name} | FieldAcc],
-                                  RecordAcc, EnumAcc);
-        false -> {error, {unknown_record_field_type, Type}}
+parse_record_body(Tokens = [_ | _], FieldAcc, RecordAcc, EnumAcc) ->
+    case parse_declared_type(Tokens, unknown_record_field_type) of
+        {ok, Type, [{id, Name}, {endofline, ";"} | Rest]} ->
+            parse_record_body(Rest, [#{type => Type, name => Name} | FieldAcc],
+                              RecordAcc, EnumAcc);
+        {ok, _Type, _Rest} -> {error, {expected_record_field, Tokens}};
+        Error -> Error
     end;
-parse_record_body([{id, Type}, {id, Name}, {endofline, ";"} | Rest],
-                  FieldAcc, RecordAcc, EnumAcc) ->
-    parse_record_body(Rest, [#{type => {named, Type}, name => Name} | FieldAcc],
-                      RecordAcc, EnumAcc);
-parse_record_body([{times, "*"}, {keyword, Type}, {id, Name},
-                   {endofline, ";"} | Rest], FieldAcc, RecordAcc, EnumAcc) ->
-    case is_type(Type) of
-        true -> parse_record_body(Rest, [#{type => {pointer, Type}, name => Name} | FieldAcc],
-                                  RecordAcc, EnumAcc);
-        false -> {error, {unknown_record_field_type, Type}}
-    end;
-parse_record_body([{times, "*"}, {id, Type}, {id, Name},
-                   {endofline, ";"} | Rest], FieldAcc, RecordAcc, EnumAcc) ->
-    parse_record_body(Rest, [#{type => {pointer, {named, Type}}, name => Name} | FieldAcc],
-                      RecordAcc, EnumAcc);
 parse_record_body([], _FieldAcc, _RecordAcc, _EnumAcc) ->
-    {error, unterminated_record_body};
-parse_record_body(Other, _FieldAcc, _RecordAcc, _EnumAcc) ->
-    {error, {expected_record_field, Other}}.
+    {error, unterminated_record_body}.
 
 parse_enum_body([{rbrace, "}"} | Rest], VariantAcc, RecordAcc, EnumAcc) ->
     Variants = lists:reverse(VariantAcc),
@@ -496,87 +496,73 @@ validate_loop_binding_name("it") ->
 validate_loop_binding_name(_Name) ->
     ok.
 
-parse_return_types([{keyword, Type} | Rest]) ->
-    checked_type(Type, [Type], Rest, unknown_return_type);
-parse_return_types([{id, Name}, {id, _FunctionName} | _] = Tokens) ->
-    [_TypeToken | Rest] = Tokens,
-    {ok, [{named, Name}], Rest};
 parse_return_types([{lparen, "("} | Rest]) ->
     parse_type_list(Rest, []);
-parse_return_types([{times, "*"}, {keyword, Type} | Rest]) ->
-    checked_type(Type, [{pointer, Type}], Rest, unknown_return_type);
-parse_return_types([{times, "*"}, {id, Name} | Rest]) ->
-    {ok, [{pointer, {named, Name}}], Rest};
-parse_return_types(Other) ->
-    {error, {expected_return_type, Other}}.
-
-parse_type_list([{keyword, Type}, {comma, ","} | Rest], Acc) ->
-    case is_type(Type) of
-        true -> parse_type_list(Rest, [Type | Acc]);
-        false -> {error, {unknown_return_type, Type}}
-    end;
-parse_type_list([{keyword, Type}, {rparen, ")"} | Rest], Acc) ->
-    checked_type(Type, lists:reverse([Type | Acc]), Rest, unknown_return_type);
-parse_type_list([{id, Name}, {comma, ","} | Rest], Acc) ->
-    parse_type_list(Rest, [{named, Name} | Acc]);
-parse_type_list([{id, Name}, {rparen, ")"} | Rest], Acc) ->
-    {ok, lists:reverse([{named, Name} | Acc]), Rest};
-parse_type_list([{times, "*"}, {keyword, Type}, {comma, ","} | Rest], Acc) ->
-    case is_type(Type) of
-        true -> parse_type_list(Rest, [{pointer, Type} | Acc]);
-        false -> {error, {unknown_return_type, Type}}
-    end;
-parse_type_list([{times, "*"}, {keyword, Type}, {rparen, ")"} | Rest], Acc) ->
-    {ok, lists:reverse([{pointer, Type} | Acc]), Rest};
-parse_type_list([{times, "*"}, {id, Name}, {comma, ","} | Rest], Acc) ->
-    parse_type_list(Rest, [{pointer, {named, Name}} | Acc]);
-parse_type_list([{times, "*"}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
-    {ok, lists:reverse([{pointer, {named, Name}} | Acc]), Rest};
-parse_type_list(Other, _Acc) ->
-    {error, {expected_return_type, Other}}.
-
-checked_type(Type, Value, Rest, ErrorTag) ->
-    case Type of
-        void -> {error, void_return_type};
-        _ ->
-            case is_type(Type) of
-                true -> {ok, Value, Rest};
-                false -> {error, {ErrorTag, Type}}
-            end
+parse_return_types([{keyword, void} | _Rest]) ->
+    {error, void_return_type};
+parse_return_types([{id, _Name}, {lparen, "("} | _Rest] = Tokens) ->
+    {error, {expected_return_type, Tokens}};
+parse_return_types(Tokens) ->
+    case parse_declared_type(Tokens, unknown_return_type) of
+        {ok, void, _Rest} -> {error, void_return_type};
+        {ok, Type, Rest} -> {ok, [Type], Rest};
+        {error, {unknown_return_type, _}} = Error -> Error;
+        _ -> {error, {expected_return_type, Tokens}}
     end.
+
+parse_type_list(Tokens, Acc) ->
+    case parse_declared_type(Tokens, unknown_return_type) of
+        {ok, void, _Rest} -> {error, void_return_type};
+        {ok, Type, [{comma, ","} | Rest]} -> parse_type_list(Rest, [Type | Acc]);
+        {ok, Type, [{rparen, ")"} | Rest]} ->
+            {ok, lists:reverse([Type | Acc]), Rest};
+        {ok, _Type, _Rest} -> {error, {expected_return_type, Tokens}};
+        Error -> Error
+    end.
+
+parse_declared_type([{keyword, strict} | Rest], ErrorTag) ->
+    parse_pointer_type(Rest, ErrorTag, strict, 0);
+parse_declared_type(Tokens, ErrorTag) ->
+    parse_pointer_type(Tokens, ErrorTag, ordinary, 0).
+
+parse_pointer_type([{times, "*"} | Rest], ErrorTag, Qualifier, Depth) ->
+    parse_pointer_type(Rest, ErrorTag, Qualifier, Depth + 1);
+parse_pointer_type([{keyword, Type} | Rest], ErrorTag, Qualifier, Depth) ->
+    case is_type(Type) of
+        true -> finish_declared_type(Type, Rest, Qualifier, Depth);
+        false -> {error, {ErrorTag, Type}}
+    end;
+parse_pointer_type([{id, Name} | Rest], _ErrorTag, Qualifier, Depth) ->
+    finish_declared_type({named, Name}, Rest, Qualifier, Depth);
+parse_pointer_type(_Tokens, _ErrorTag, strict, 0) ->
+    {error, strict_requires_pointer};
+parse_pointer_type(Tokens, _ErrorTag, _Qualifier, _Depth) ->
+    {error, {expected_type, Tokens}}.
+
+finish_declared_type(_Base, _Rest, strict, 0) ->
+    {error, strict_requires_pointer};
+finish_declared_type(Base, Rest, strict, Depth) ->
+    {ok, {strict_pointer, wrap_pointer(Base, Depth - 1)}, Rest};
+finish_declared_type(Base, Rest, ordinary, Depth) ->
+    {ok, wrap_pointer(Base, Depth), Rest}.
+
+wrap_pointer(Type, 0) -> Type;
+wrap_pointer(Type, Depth) -> {pointer, wrap_pointer(Type, Depth - 1)}.
 
 return_type([Type]) -> Type;
 return_type(Types) -> {multiple, Types}.
 
 parse_parameters([{rparen, ")"} | Rest], Acc) ->
     {ok, lists:reverse(Acc), Rest};
-parse_parameters([{keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
-    case is_type(Type) of
-        true -> parse_parameters(Rest, [#{type => Type, name => Name} | Acc]);
-        false -> {error, {unknown_parameter_type, Type}}
-    end;
-parse_parameters([{keyword, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
-    case is_type(Type) of
-        true -> {ok, lists:reverse([#{type => Type, name => Name} | Acc]), Rest};
-        false -> {error, {unknown_parameter_type, Type}}
-    end;
-parse_parameters([{id, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
-    parse_parameters(Rest, [#{type => {named, Type}, name => Name} | Acc]);
-parse_parameters([{id, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
-    {ok, lists:reverse([#{type => {named, Type}, name => Name} | Acc]), Rest};
-parse_parameters([{times, "*"}, {keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
-    case is_type(Type) of
-        true -> parse_parameters(Rest, [#{type => {pointer, Type}, name => Name} | Acc]);
-        false -> {error, {unknown_parameter_type, Type}}
-    end;
-parse_parameters([{times, "*"}, {keyword, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
-    {ok, lists:reverse([#{type => {pointer, Type}, name => Name} | Acc]), Rest};
-parse_parameters([{times, "*"}, {id, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
-    parse_parameters(Rest, [#{type => {pointer, {named, Type}}, name => Name} | Acc]);
-parse_parameters([{times, "*"}, {id, Type}, {id, Name}, {rparen, ")"} | Rest], Acc) ->
-    {ok, lists:reverse([#{type => {pointer, {named, Type}}, name => Name} | Acc]), Rest};
-parse_parameters(Other, _Acc) ->
-    {error, {expected_parameter, Other}}.
+parse_parameters(Tokens, Acc) ->
+    case parse_declared_type(Tokens, unknown_parameter_type) of
+        {ok, Type, [{id, Name}, {comma, ","} | Rest]} ->
+            parse_parameters(Rest, [#{type => Type, name => Name} | Acc]);
+        {ok, Type, [{id, Name}, {rparen, ")"} | Rest]} ->
+            {ok, lists:reverse([#{type => Type, name => Name} | Acc]), Rest};
+        {ok, _Type, _Rest} -> {error, {expected_parameter, Tokens}};
+        Error -> Error
+    end.
 
 take_body([], _Depth, _Acc) ->
     {error, unterminated_function_body};
@@ -600,12 +586,12 @@ duplicate_name([F | Rest], Seen) ->
 validate_main_function(Functions) ->
     case [F || F <- Functions, maps:get(name, F) == "Main"] of
         [] -> {error, missing_entry_point};
-        [#{return_types := [number],
-           params := [#{type := string, name := "Args"}]}] ->
+        [#{return_types := [{strict_pointer, sint}],
+           params := [#{type := {pointer, string}, name := "Args"}]}] ->
             ok;
         [_] ->
             {error, {invalid_entry_point_signature,
-                     "function Number Main(String Args) { ... }"}}
+                     "function strict *SInt Main(*String Args) { ... }"}}
     end.
 
 validate_entry(#{module_kind := library}, _Functions) ->
@@ -681,6 +667,7 @@ first_invalid_external_type([External | Rest]) ->
     end.
 
 ffi_type_allowed({pointer, _Type}) -> false;
+ffi_type_allowed({strict_pointer, _Type}) -> false;
 ffi_type_allowed(state) -> false;
 ffi_type_allowed(var) -> false;
 ffi_type_allowed({named, _Name}) -> true;
@@ -773,6 +760,7 @@ validate_declared_types(Records, Enums, Functions, Externals) ->
 
 named_type_names({named, Name}) -> [Name];
 named_type_names({pointer, Type}) -> named_type_names(Type);
+named_type_names({strict_pointer, Type}) -> named_type_names(Type);
 named_type_names(_Type) -> [].
 
 env_from_bindings(Bindings) ->
@@ -996,9 +984,9 @@ env_bindings([]) ->
 
 parse_statements([], _F, _Sigs, Env, Acc) ->
     {ok, lists:reverse(Acc), Env};
-parse_statements([{id, Name}, {dot, "."}, {times, "*"}, {equals, "="} | Rest],
+parse_statements([{id, Name}, {dot, "."}, {times, "*"} | Rest],
                  F, Sigs, Env, Acc) ->
-    parse_pointer_write(Name, Rest, F, Sigs, Env, Acc);
+    parse_pointer_write({var_ref, Name}, Rest, F, Sigs, Env, Acc);
 parse_statements([{id, Name}, {equals, "="} | _Rest], _F, _Sigs, Env, _Acc) ->
     case env_has(Name, Env) of
         true -> {error, {immutable_variable, Name}};
@@ -1508,36 +1496,6 @@ parse_scoped_statement(Tokens, F, Sigs, Env, Acc) ->
         Error -> Error
     end.
 
-parse_scoped_declaration([{keyword, Scope}, {keyword, Type}, {id, Name},
-                          {equals, "="} | ValueTokens], Sigs, Env) ->
-    parse_declaration_value(Scope, runtime, Type, Name, ValueTokens, Sigs, Env);
-parse_scoped_declaration([{keyword, Scope}, {id, Type}, {id, Name},
-                          {equals, "="} | ValueTokens], Sigs, Env) ->
-    parse_declaration_value(Scope, runtime, {named, Type}, Name, ValueTokens, Sigs, Env);
-parse_scoped_declaration([{keyword, Scope}, {times, "*"}, {keyword, Type}, {id, Name},
-                          {equals, "="} | ValueTokens], Sigs, Env) ->
-    parse_pointer_declaration(Scope, runtime, Type, Name, ValueTokens, Sigs, Env);
-parse_scoped_declaration([{keyword, Scope}, {times, "*"}, {id, Type}, {id, Name},
-                          {equals, "="} | ValueTokens], Sigs, Env) ->
-    parse_pointer_declaration(Scope, runtime, {named, Type}, Name, ValueTokens, Sigs, Env);
-parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {keyword, Type},
-                          {id, Name}, {equals, "="} | ValueTokens], Sigs, Env)
-  when Modifier == lazy; Modifier == const; Modifier == computed;
-       Modifier == atomic; Modifier == thread_local ->
-    parse_declaration_value(Scope, Modifier, Type, Name, ValueTokens, Sigs, Env);
-parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {times, "*"},
-                          {keyword, Type}, {id, Name}, {equals, "="} | ValueTokens],
-                         Sigs, Env)
-  when Modifier == lazy; Modifier == const; Modifier == computed;
-       Modifier == atomic; Modifier == thread_local ->
-    parse_pointer_declaration(Scope, Modifier, Type, Name, ValueTokens, Sigs, Env);
-parse_scoped_declaration([{keyword, Scope}, {keyword, Modifier}, {times, "*"},
-                          {id, Type}, {id, Name}, {equals, "="} | ValueTokens],
-                         Sigs, Env)
-  when Modifier == lazy; Modifier == const; Modifier == computed;
-       Modifier == atomic; Modifier == thread_local ->
-    parse_pointer_declaration(Scope, Modifier, {named, Type}, Name,
-                              ValueTokens, Sigs, Env);
 parse_scoped_declaration([{keyword, Scope}, {lparen, "("} | Rest], Sigs, Env) ->
     case parse_parenthesized_bindings(Rest, []) of
         {ok, Bindings, [{equals, "="} | ValueTokens]} ->
@@ -1561,8 +1519,29 @@ parse_scoped_declaration([{keyword, Scope}, {lparen, "("} | Rest], Sigs, Env) ->
         {ok, _Bindings, Other} -> {error, {expected_equals, Other}};
         Error -> Error
     end;
+parse_scoped_declaration([{keyword, Scope} | Tokens], Sigs, Env) ->
+    {Modifier, TypeTokens} = declaration_modifier(Tokens),
+    case parse_declared_type(TypeTokens, unknown_variable_type) of
+        {ok, Type, [{id, Name}, {equals, "="} | ValueTokens]} ->
+            case pointer_type(Type) of
+                true ->
+                    parse_pointer_declaration(Scope, Modifier, Type, Name,
+                                              ValueTokens, Sigs, Env);
+                false ->
+                    parse_declaration_value(Scope, Modifier, Type, Name,
+                                            ValueTokens, Sigs, Env)
+            end;
+        {ok, _Type, _Rest} -> {error, {expected_variable_declaration, Tokens}};
+        Error -> Error
+    end;
 parse_scoped_declaration(Tokens, _Sigs, _Env) ->
     {error, {expected_variable_declaration, Tokens}}.
+
+declaration_modifier([{keyword, Modifier} | Rest])
+  when Modifier == lazy; Modifier == const; Modifier == computed;
+       Modifier == atomic; Modifier == thread_local ->
+    {Modifier, Rest};
+declaration_modifier(Tokens) -> {runtime, Tokens}.
 
 parse_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, Env) ->
     case parse_expr(ValueTokens, Sigs, Env) of
@@ -1594,19 +1573,19 @@ parse_declaration_value(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, 
         Error -> Error
     end.
 
-parse_pointer_declaration(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs, Env) ->
+parse_pointer_declaration(Scope, Modifier, PointerType, Name, ValueTokens, Sigs, Env) ->
     case pointer_storage_allowed(Scope, Modifier) of
         ok ->
             case parse_expr(ValueTokens, Sigs, Env) of
                 {ok, Value, [{endofline, ";"}]} ->
                     case single_type(Value, Sigs, Env) of
-                        {ok, {pointer, ActualPointee}} ->
-                            finish_pointer_declaration(Scope, Modifier, DeclaredType,
-                                                       ActualPointee, Name, Value, Sigs, Env);
                         {ok, ActualType} ->
-                            finish_pointer_declaration(Scope, Modifier, DeclaredType,
-                                                       ActualType, Name,
-                                                       {pointer_new, Value}, Sigs, Env);
+                            case coerce_pointer_value(PointerType, ActualType, Value) of
+                                {ok, PointerValue} ->
+                                    finish_pointer_declaration(Scope, Modifier, PointerType,
+                                                               Name, PointerValue, Env);
+                                Error -> Error
+                            end;
                         Error -> Error
                     end;
                 {ok, _Value, Other} -> {error, {expected_endofline, Other}};
@@ -1615,34 +1594,67 @@ parse_pointer_declaration(Scope, Modifier, DeclaredType, Name, ValueTokens, Sigs
         Error -> Error
     end.
 
-finish_pointer_declaration(Scope, Modifier, DeclaredType, ActualType, Name, Value,
-                           _Sigs, Env) ->
-    PointeeType = case DeclaredType of var -> ActualType; _ -> DeclaredType end,
-    case type_accepts(PointeeType, ActualType) of
-        true ->
-            PointerType = {pointer, PointeeType},
-            {ok, #{kind => variable, scope => Scope, eval => Modifier,
-                   type => PointerType, name => Name, value => Value,
-                   concurrency => shared},
-             env_put(Name, PointerType, Env)};
-        false -> {error, {pointer_type_mismatch, PointeeType, ActualType}}
+coerce_pointer_value({strict_pointer, Expected}, {pointer, Actual}, Value)
+  when Expected =:= Actual -> {ok, Value};
+coerce_pointer_value({strict_pointer, Expected}, {strict_pointer, Actual}, Value)
+  when Expected =:= Actual -> {ok, Value};
+coerce_pointer_value({strict_pointer, Expected}, Actual, _Value) ->
+    {error, {strict_pointer_mismatch, Expected, Actual}};
+coerce_pointer_value(Expected = {pointer, _}, Actual, Value) ->
+    case type_accepts(Expected, Actual) of
+        true -> {ok, Value};
+        false -> coerce_pointer_level(Expected, Actual, Value)
     end.
+
+coerce_pointer_level({pointer, Expected}, Actual, Value) ->
+    case pointer_type(Expected) of
+        true ->
+            case coerce_pointer_value(Expected, Actual, Value) of
+                {ok, InnerValue} -> {ok, {pointer_new, InnerValue}};
+                Error -> Error
+            end;
+        false ->
+            case type_accepts(Expected, Actual) of
+                true -> {ok, {pointer_new, Value}};
+                false -> {error, {pointer_type_mismatch, Expected, Actual}}
+            end
+    end.
+
+finish_pointer_declaration(Scope, Modifier, PointerType, Name, Value, Env) ->
+    {ok, #{kind => variable, scope => Scope, eval => Modifier,
+           type => PointerType, name => Name, value => Value,
+           concurrency => shared},
+     env_put(Name, PointerType, Env)}.
 
 pointer_storage_allowed(local, runtime) -> ok;
 pointer_storage_allowed(Scope, Modifier) ->
     {error, {invalid_pointer_storage, Scope, Modifier}}.
 
-parse_pointer_write(Name, Tokens, F, Sigs, Env, Acc) ->
-    case env_find(Name, Env) of
-        {ok, {pointer, PointeeType}} ->
+parse_pointer_write(Pointer, [{dot, "."}, {times, "*"} | Rest], F, Sigs, Env, Acc) ->
+    parse_pointer_write({pointer_read, Pointer}, Rest, F, Sigs, Env, Acc);
+parse_pointer_write(Pointer, [{equals, "="} | Tokens], F, Sigs, Env, Acc) ->
+    case single_type(Pointer, Sigs, Env) of
+        {ok, PointerType = {pointer, PointeeType}} ->
+            finish_pointer_write(PointerType, PointeeType, Pointer, Tokens,
+                                 F, Sigs, Env, Acc);
+        {ok, PointerType = {strict_pointer, PointeeType}} ->
+            finish_pointer_write(PointerType, PointeeType, Pointer, Tokens,
+                                 F, Sigs, Env, Acc);
+        {ok, Type} -> {error, {dereference_non_pointer, Type}};
+        Error -> Error
+    end;
+parse_pointer_write(_Pointer, Tokens, _F, _Sigs, _Env, _Acc) ->
+    {error, {expected_pointer_write, Tokens}}.
+
+finish_pointer_write(PointerType, PointeeType, Pointer, Tokens, F, Sigs, Env, Acc) ->
             case parse_expr(Tokens, Sigs, Env) of
                 {ok, Value, [{endofline, ";"} | Remaining]} ->
                     case single_type(Value, Sigs, Env) of
                         {ok, ActualType} ->
-                            case type_accepts(PointeeType, ActualType) of
+                            case pointer_value_accepts(PointerType, ActualType) of
                                 true ->
                                     Statement = #{kind => pointer_write,
-                                                  pointer => {var_ref, Name},
+                                                  pointer => Pointer,
                                                   value => Value},
                                     parse_statements(Remaining, F, Sigs, Env,
                                                      [Statement | Acc]);
@@ -1654,10 +1666,10 @@ parse_pointer_write(Name, Tokens, F, Sigs, Env, Acc) ->
                     end;
                 {ok, _Value, Other} -> {error, {expected_endofline, Other}};
                 Error -> Error
-            end;
-        {ok, Type} -> {error, {dereference_non_pointer, Type}};
-        error -> {error, {unknown_variable, Name}}
-    end.
+            end.
+
+pointer_value_accepts({strict_pointer, Expected}, Actual) -> Expected =:= Actual;
+pointer_value_accepts({pointer, Expected}, Actual) -> type_accepts(Expected, Actual).
 
 parse_parenthesized_bindings([{keyword, Type}, {id, Name}, {comma, ","} | Rest], Acc) ->
     parse_parenthesized_bindings(Rest, [{Type, Name} | Acc]);
@@ -2063,6 +2075,10 @@ parse_call(Name, [{rparen, ")"} | Rest], Sigs, Env) ->
         {ok, _} -> {ok, call_expression(Name, [], Sigs), Rest};
         Error -> Error
     end;
+parse_call("receive", [{keyword, Type}, {rparen, ")"} | Rest], Sigs, Env) ->
+    receive_call({type_spec, Type}, Rest, Sigs, Env);
+parse_call("receive", [{id, TypeName}, {rparen, ")"} | Rest], Sigs, Env) ->
+    receive_call({type_spec, {named, TypeName}}, Rest, Sigs, Env);
 parse_call(Name, Tokens, Sigs, Env) ->
     case parse_sequence(Tokens, rparen, call_args, [], Sigs, Env) of
         {ok, {call_args, Args}, Rest} ->
@@ -2070,6 +2086,12 @@ parse_call(Name, Tokens, Sigs, Env) ->
                 {ok, _} -> {ok, call_expression(Name, Args, Sigs), Rest};
                 Error -> Error
             end;
+        Error -> Error
+    end.
+
+receive_call(TypeSpec, Rest, Sigs, Env) ->
+    case validate_call("receive", [TypeSpec], Sigs, Env) of
+        {ok, _} -> {ok, {call, "receive", [TypeSpec]}, Rest};
         Error -> Error
     end.
 
@@ -2190,6 +2212,20 @@ validate_call({remote, ModuleName, FunctionName}, Args, Sigs, Env) ->
     validate_remote_call(ModuleName, FunctionName, Args, Sigs, Env);
 validate_call({ffi, ModuleName, FunctionName}, Args, Sigs, Env) ->
     validate_ffi_call(ModuleName, FunctionName, Args, Sigs, Env);
+validate_call("self", [], _Sigs, _Env) -> {ok, [pid]};
+validate_call("self", Args, _Sigs, _Env) ->
+    {error, {process_primitive_arity, "self", 0, length(Args)}};
+validate_call("spawn", [Call], Sigs, Env) -> validate_spawn(Call, Sigs, Env);
+validate_call("spawn", Args, _Sigs, _Env) ->
+    {error, {process_primitive_arity, "spawn", 1, length(Args)}};
+validate_call("send", [Pid, Message], Sigs, Env) ->
+    validate_send(Pid, Message, Sigs, Env);
+validate_call("send", Args, _Sigs, _Env) ->
+    {error, {process_primitive_arity, "send", 2, length(Args)}};
+validate_call("receive", [{type_spec, Type}], Sigs, _Env) ->
+    validate_receive_type(Type, Sigs);
+validate_call("receive", Args, _Sigs, _Env) ->
+    {error, {process_primitive_arity, "receive", 1, length(Args)}};
 validate_call(Name, Args, Sigs, Env)
   when Name == number; Name == int; Name == sint; Name == float ->
     validate_numeric_conversion(Name, Args, Sigs, Env);
@@ -2198,6 +2234,9 @@ validate_call(Name, Args, Sigs, Env) when is_list(Name) ->
         none -> validate_named_call(Name, Args, Sigs, Env);
         Helper -> validate_conversion_helper(Name, Helper, Args, Sigs, Env)
     end;
+validate_call(Name, _Args, _Sigs, _Env)
+  when Name == binary; Name == pid; Name == reference ->
+    {error, {type_has_no_constructor, Name}};
 validate_call(Name, Args, Sigs, Env) when is_atom(Name) ->
     case is_type(Name) of
         true ->
@@ -2206,6 +2245,47 @@ validate_call(Name, Args, Sigs, Env) when is_atom(Name) ->
                 Error -> Error
             end;
         false -> {error, {unknown_function, Name}}
+    end.
+
+validate_spawn({call, Name, Args}, Sigs, Env) when is_list(Name) ->
+    case maps:find(Name, Sigs) of
+        {ok, #{kind := function, params := Params}} ->
+            Expected = [maps:get(type, Param) || Param <- Params],
+            case expression_types(Args, Sigs, Env, []) of
+                {ok, Actual} ->
+                    case types_accept(Expected, Actual) of
+                        true -> validate_process_types(Actual, [pid]);
+                        false -> {error, {argument_type_mismatch, Name, Expected, Actual}}
+                    end;
+                Error -> Error
+            end;
+        _ -> {error, spawn_requires_function_call}
+    end;
+validate_spawn(_Value, _Sigs, _Env) ->
+    {error, spawn_requires_function_call}.
+
+validate_send(Pid, Message, Sigs, Env) ->
+    case {single_type(Pid, Sigs, Env), single_type(Message, Sigs, Env)} of
+        {{ok, pid}, {ok, MessageType}} -> validate_process_types([MessageType], [atom]);
+        {{ok, PidType}, {ok, _MessageType}} -> {error, {send_requires_pid, PidType}};
+        {{error, Reason}, _} -> {error, Reason};
+        {_, {error, Reason}} -> {error, Reason}
+    end.
+
+validate_receive_type({named, Name} = Type, Sigs) ->
+    case maps:find(Name, Sigs) of
+        {ok, #{kind := Kind}} when Kind == struct; Kind == enum ->
+            validate_process_types([Type], [Type]);
+        _ -> {error, {unknown_message_type, Name}}
+    end;
+validate_receive_type(Type, _Sigs) ->
+    validate_process_types([Type], [Type]).
+
+validate_process_types([], Returns) -> {ok, Returns};
+validate_process_types([Type | Rest], Returns) ->
+    case ffi_type_allowed(Type) of
+        true -> validate_process_types(Rest, Returns);
+        false -> {error, {invalid_process_value_type, Type}}
     end.
 
 validate_remote_call(ModuleName, FunctionName, Args, Sigs, Env) ->
@@ -2271,21 +2351,21 @@ conversion_helper("parse_sint") -> {parse, sint};
 conversion_helper("parse_float") -> {parse, float};
 conversion_helper("parse_number") -> {parse, number};
 conversion_helper("to_string") -> {format, string};
-conversion_helper("to_binary") -> {format, string};
+conversion_helper("to_binary") -> {format, binary};
 conversion_helper(_Name) -> none.
 
 validate_conversion_helper(Name, {parse, ReturnType}, Args, Sigs, Env) ->
     validate_conversion_signature(Name, Args, [string], [ReturnType], Sigs, Env);
-validate_conversion_helper(Name, {format, string}, [Arg], Sigs, Env) ->
+validate_conversion_helper(Name, {format, ReturnType}, [Arg], Sigs, Env) ->
     case single_type(Arg, Sigs, Env) of
         {ok, Type} ->
             case stringifiable_type(Type) of
-                true -> {ok, [string]};
+                true -> {ok, [ReturnType]};
                 false -> {error, {invalid_conversion_argument, Name, Type}}
             end;
         Error -> Error
     end;
-validate_conversion_helper(Name, {format, string}, Args, _Sigs, _Env) ->
+validate_conversion_helper(Name, {format, _ReturnType}, Args, _Sigs, _Env) ->
     {error, {conversion_arity, Name, 1, length(Args)}}.
 
 validate_conversion_signature(Name, Args, Expected, Returns, Sigs, Env) ->
@@ -2306,6 +2386,7 @@ stringifiable_type(float) -> true;
 stringifiable_type(atom) -> true;
 stringifiable_type(bool) -> true;
 stringifiable_type(string) -> true;
+stringifiable_type(binary) -> true;
 stringifiable_type(_) -> false.
 
 validate_user_function(Name, Args, Sigs, Env) ->
@@ -2395,6 +2476,7 @@ infer_types({pointer_new, Value}, Sigs, Env) ->
 infer_types({pointer_read, Value}, Sigs, Env) ->
     case single_type(Value, Sigs, Env) of
         {ok, {pointer, Type}} -> {ok, [Type]};
+        {ok, {strict_pointer, Type}} -> {ok, [Type]};
         {ok, Type} -> {error, {dereference_non_pointer, Type}};
         Error -> Error
     end;
@@ -2414,6 +2496,7 @@ infer_types({var_ref, Name}, _Sigs, Env) ->
         {ok, Type} -> {ok, [Type]};
         error -> {error, {unknown_variable, Name}}
     end;
+infer_types({type_spec, Type}, _Sigs, _Env) -> {ok, [Type]};
 infer_types({try_call, Name, Args}, Sigs, Env) -> validate_call(Name, Args, Sigs, Env);
 infer_types({pipe_call, Left, Name, Args}, Sigs, Env) ->
     validate_call(Name, [Left | Args], Sigs, Env);
@@ -2534,8 +2617,18 @@ type_accepts(number, float) -> true;
 type_accepts(sint, int) -> true;
 type_accepts({pointer, Expected}, {pointer, Actual}) ->
     type_accepts(Expected, Actual);
+type_accepts({pointer, Expected}, {strict_pointer, Actual}) ->
+    type_accepts(Expected, Actual);
+type_accepts({strict_pointer, Expected}, {pointer, Actual}) ->
+    Expected =:= Actual;
+type_accepts({strict_pointer, Expected}, {strict_pointer, Actual}) ->
+    Expected =:= Actual;
 type_accepts(Type, Type) -> true;
 type_accepts(_, _) -> false.
+
+pointer_type({pointer, _}) -> true;
+pointer_type({strict_pointer, _}) -> true;
+pointer_type(_) -> false.
 
 is_type(state) -> true;
 is_type(var) -> true;

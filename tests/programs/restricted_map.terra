@@ -1,6 +1,6 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local RestrictedMap limited = RestrictedMap(3, #(:first => 1, :second => 2));
     local Map ordinary = #(:name => "Terra", :version => 1);
     stdout(limited.members, ordinary.members);
-    return limited.count + ordinary.count;
+    return *SInt(limited.count + ordinary.count);
 }

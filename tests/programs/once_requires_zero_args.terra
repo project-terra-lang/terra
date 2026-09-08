@@ -2,7 +2,7 @@ function Number NeedsValue(Int value) {
     return value;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     NeedsValue;
-    return 0;
+    return *SInt(0);
 }

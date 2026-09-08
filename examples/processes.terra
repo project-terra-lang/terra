@@ -1,0 +1,20 @@
+function Atom Worker(PID parent) {
+    local *String ready = "ready";
+    send(parent, ready.*);
+
+    local String reply = receive(String);
+    send(parent, reply);
+    return :done;
+}
+
+function strict *SInt Main(*String Args) {
+    local PID worker = spawn(Worker(self()));
+    local String ready = receive(String);
+    send(worker, "ack");
+    local String reply = receive(String);
+
+    if ready == "ready" && reply == "ack" {
+        return *SInt(1);
+    }
+    return *SInt(0);
+}

@@ -3,6 +3,6 @@ function Float Divide(Int value) {
     return adjusted / 0;
 }
 
-function Number Main(String Args) {
-    return Divide(4);
+function strict *SInt Main(*String Args) {
+    return *SInt(Divide(4));
 }

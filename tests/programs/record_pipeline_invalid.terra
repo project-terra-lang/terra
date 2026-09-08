@@ -2,7 +2,7 @@ struct Score {
     Int value;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Score score = 7 |> Score();
-    return 0;
+    return *SInt(0);
 }

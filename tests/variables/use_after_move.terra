@@ -1,6 +1,6 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local Tuple pair = (1, "one");
 local (Int id, String label) = pair;
 local Tuple again = pair;
-return 0;
+return *SInt(0);
 }

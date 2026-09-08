@@ -1,5 +1,5 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local Int base = 2;
 local const Int total = base + 3;
-return 0;
+return *SInt(0);
 }

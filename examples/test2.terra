@@ -20,7 +20,7 @@ function Socket MakeSocket(*String host) {
     return Socket(SockAddr.Addr(host));
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local *String args = Args;
     local Socket socket = MakeSocket(args);
     local *Socket sock = socket;
@@ -29,12 +29,12 @@ function Number Main(String Args) {
     if web.sock.*.address == {
         case SockAddr.Addr(bind host):
             stdout(web.server_name, host);
-            return web.port;
+            return *SInt(web.port);
         case SockAddr.PORT(bind value):
-            return value;
+            return *SInt(value);
         case SockAddr.Newt():
-            return 0;
+            return *SInt(0);
         case:
-            return 0;
+            return *SInt(0);
     }
 }

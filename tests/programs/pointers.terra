@@ -22,7 +22,7 @@ function *String Identity(*String value) {
     return value;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local *String name = "initial";
     Rename(name);
     local *String same_name = Identity(name);
@@ -36,7 +36,7 @@ function Number Main(String Args) {
         case NameResult.Missing():
             stdout("missing");
         case:
-            stdout(Args);
+            stdout(Args.*);
     }
-    return 7;
+    return *SInt(7);
 }

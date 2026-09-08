@@ -10,6 +10,6 @@ function Number Analyze(Int used, Int spare) {
     return value;
 }
 
-function Number Main(String Args) {
-    return Analyze(1, 2);
+function strict *SInt Main(*String Args) {
+    return *SInt(Analyze(1, 2));
 }

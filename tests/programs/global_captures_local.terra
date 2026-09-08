@@ -1,4 +1,4 @@
-function Number Main(String Args) {
-    global String captured = Args;
-    return 0;
+function strict *SInt Main(*String Args) {
+    global String captured = Args.*;
+    return *SInt(0);
 }

@@ -3,7 +3,7 @@
 main(_Args) ->
     code:add_pathz("./ebin"),
     Expected = [number, int, sint, float, atom, bool, map, restricted_map,
-                list, tuple, string],
+                list, tuple, string, binary, pid, reference],
     Expected = datatypes:all(),
     [true = datatypes:is_type(Type) || Type <- Expected],
     false = datatypes:is_type(state),

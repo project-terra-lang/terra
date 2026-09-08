@@ -1,5 +1,5 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local lazy Int expensive = 10;
 local Int copy = expensive;
-return 0;
+return *SInt(0);
 }

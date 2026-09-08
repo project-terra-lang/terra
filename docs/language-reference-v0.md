@@ -14,21 +14,25 @@ valid inside a function or block scope.
 Every valid executable program must declare exactly one entry point:
 
 ```terra
-function Number Main(String Args) {
-  return 0;
+function strict *SInt Main(*String Args) {
+  return *SInt(0);
 }
 ```
 
-The entry point receives command-line arguments as `String Args` and returns a
-`Number`.
+The entry point receives a temporary-region `*String Args` and returns a
+temporary-region `strict *SInt`. The qualifier applies only to the returned
+pointer. The generated `main/1` launcher owns the region: it
+stores the converted platform arguments, calls Terra `Main`, dereferences and
+validates the signed integer result, then cleans up in an `after` block. The
+BEAM-facing result is an ordinary integer, never a pointer.
 
 Module imports and exports are intentionally small and local:
 
 ```terra
 import math_lib;
 
-function Number Main(String Args) {
-  return math_lib.Add(2, 3);
+function strict *SInt Main(*String Args) {
+  return *SInt(math_lib.Add(2, 3));
 }
 ```
 
@@ -74,8 +78,8 @@ An Erlang call must be selected by an exact module-level `extern` signature:
 ```terra
 extern Number erlang.lists.sum(List values);
 
-function Number Main(String Args) {
-  return erlang.lists.sum([1, 2, 3]);
+function strict *SInt Main(*String Args) {
+  return *SInt(erlang.lists.sum([1, 2, 3]));
 }
 ```
 
@@ -97,6 +101,9 @@ Terra values have one documented FFI representation:
 | `Atom` | atom |
 | `Bool` | atom `true` or `false` |
 | `String` | UTF-8 binary |
+| `Binary` | arbitrary binary |
+| `PID` | process identifier |
+| `Reference` | reference |
 | `List` | list |
 | `Tuple` | tuple |
 | `Map` | map |
@@ -111,6 +118,32 @@ element of a multiple-return tuple. A mismatch raises
 `{invalid_erlang_return, Module, Function, ExpectedType, Value}`. External
 signatures reject temporary-region pointers, inferred `Var`, and placeholder
 `State`, because none has a stable cross-boundary value contract.
+
+### Process primitives
+
+Terra has four built-in process operations:
+
+```terra
+local PID parent = self();
+local PID worker = spawn(Worker(parent, "ready"));
+send(worker, :continue);
+local String reply = receive(String);
+```
+
+- `self()` returns the current BEAM process identifier.
+- `spawn(Function(arguments))` accepts one direct call to a Terra function,
+  evaluates its arguments in the parent, and runs it in a new BEAM process.
+- `send(pid, value)` sends one value and returns the atom `:ok`.
+- `receive(Type)` blocks for the next mailbox value, validates it, and returns
+  it with the requested static type.
+
+The receive type may be a concrete built-in type or a declared struct or enum.
+A mismatched next message is consumed and raises
+`{invalid_terra_message, ExpectedType, Value}`. The transfer rules are the same
+as the FFI mapping: pointers, `Var`, and `State` cannot be messages or spawn
+arguments. Each spawned process gets an independent temporary region when the
+module uses pointers. Spawning is unlinked and unsupervised; links, monitors,
+timeouts, selective receive, and OTP behavior remain library concerns.
 
 The current compiler pipeline is split into explicit passes:
 
@@ -151,11 +184,13 @@ as Erlang-compatible integer character values.
 The current built-in types are:
 
 ```text
-Number Int SInt Float Atom Bool Map RestrictedMap List Tuple String State Var
+Number Int SInt Float Atom Bool Map RestrictedMap List Tuple String Binary PID Reference State Var
 ```
 
-Any built-in or user-defined type may be wrapped in a temporary-region pointer
-type by prefixing it with `*`, such as `*String` or `*Player`.
+Any built-in or user-defined type may be wrapped in temporary-region pointer
+levels by prefixing one or more `*`, such as `*String`, `**Int`, or `***Player`.
+`strict *Type` qualifies the outer pointer only and requires an explicitly
+constructed pointer whose pointee type matches exactly.
 
 `Number` accepts `Int`, `SInt`, and `Float` values. `Var` asks the compiler to
 infer the concrete type from the initializer. `State` is currently accepted as a
@@ -217,9 +252,15 @@ to_binary(true)
 ```
 
 `to_string` and `to_binary` accept `Number`, `Int`, `SInt`, `Float`, `Atom`,
-`Bool`, or `String`, and return `String`. Terra strings are BEAM binaries at
-runtime; `to_binary` is a named helper for that representation until Terra grows
-a distinct `Binary` type.
+`Bool`, `String`, or `Binary`. `to_binary` returns `Binary` without imposing a
+text encoding. `to_string` returns `String`; binary input must contain valid
+UTF-8 or it fails with `{invalid_conversion, binary, string, Value}`.
+
+`PID` and `Reference` are opaque immutable BEAM handles. They may be declared,
+passed, returned, compared for equality, and used in FFI/export signatures, but
+have no literal or constructor. For now, typed externals such as
+`erlang.erlang.self()` and `erlang.erlang.make_ref()` create them. `Map` is the
+native BEAM map representation already used by Terra map literals and updates.
 
 ### Absence, Failure, And Return Values
 
@@ -307,6 +348,31 @@ local String source = "Ada";
 local *String copied = *source;
 ```
 
+Each additional `*` adds another pointer level. Ordinary pointer declarations
+fill in missing levels around a compatible initializer, while explicit prefix
+stars construct those levels directly:
+
+```terra
+local **Int implicit = 1;
+local **Int explicit = **1;
+implicit.*.* = 7;
+```
+
+The `strict` qualifier applies to one pointer type, not a function or block.
+It requires an explicit pointer value with an exactly matching pointee type and
+does not apply ordinary numeric widening at that boundary:
+
+```terra
+local strict *Int exact = *1;
+local strict **Int nested = **1;
+```
+
+`strict *SInt value = *1;` is invalid because the initializer is `*Int`; use
+`*SInt(1)` to construct the exact expected pointee. A strict pointer has the
+same checked runtime representation as an ordinary pointer and may alias the
+same slot. Strictness is a compile-time construction and compatibility rule,
+not a borrow checker or ownership mode.
+
 The postfix `.*` helper reads a slot, and `pointer.* = value;` writes a
 type-compatible value into it. Pointer types are valid in plain local variables,
 function parameters and returns, call arguments, struct fields, and enum
@@ -315,16 +381,24 @@ storage. It is also kept separate from lazy, computed, atomic, and thread-local
 storage so every pointer has one predictable region lifetime.
 
 The optional first declaration `temp region(N);` sets a fixed capacity of `N`
-pointer slots. Exceeding it raises `terra_temporary_region_full`. Without the
-declaration, the compiler records the number of pointer-producing expressions
-as an initial estimate and the runtime region may grow for repeated function or
-recursive execution.
+pointer slots. Executables reserve one slot for `Main` arguments and necessarily
+use another for the returned status, so fixed executable regions must have at
+least two slots. A fixed capacity above 65,536 is rejected. Exceeding a fixed
+region raises `terra_temporary_region_full`.
 
-The generated `main/1` wrapper creates the process-local region before calling
-Terra `Main` and removes it in an `after` block on both success and failure.
-Pointer handles contain their owner process, region reference, and slot. Access
-after cleanup raises `terra_dangling_pointer`; access from another process raises
-`terra_cross_process_pointer`. Terra never exposes a raw machine address.
+Without the declaration, the compiler includes the entry argument in its count
+of pointer-producing expressions and records that count as an initial estimate.
+The region may grow for loops and recursion, but never beyond 65,536 slots per
+process; exceeding that ceiling raises `terra_temporary_region_limit`.
+
+The generated `main/1` wrapper creates the process-local region before allocating
+`Main` arguments and removes it in an `after` block on both success and failure.
+Starting a nested region in the same process raises `terra_region_already_active`.
+Each spawned Terra process creates and cleans up its own region. Pointer handles
+contain their owner process, an unforgeable region reference, and a checked
+non-negative slot. Missing regions or slots raise `terra_dangling_pointer`,
+cross-process access raises `terra_cross_process_pointer`, and malformed handles
+raise `terra_invalid_pointer`. Terra never exposes a raw machine address.
 
 ## Functions
 
@@ -724,7 +798,7 @@ function_decl   = "function", return_types, identifier, "(", [ params ], ")",
 return_types    = value_type | "(", value_type, { ",", value_type }, ")" ;
 params          = param, { ",", param } ;
 param           = value_type, identifier ;
-value_type      = type | "*", type ;
+value_type      = [ "strict" ], "*", { "*" }, type | type ;
 block           = "{", { statement }, "}" ;
 
 statement       = var_decl
@@ -747,7 +821,7 @@ global_decl     = "global", [ "const" | "atomic" ], type, identifier, "=",
                   expr, ";" ;
 const_decl      = "const", [ type ], identifier, "=", expr, ";" ;
 var_decl        = scope, [ modifier ], value_type, identifier, "=", expr, ";" ;
-pointer_write   = identifier, ".", "*", "=", expr, ";" ;
+pointer_write   = identifier, ".", "*", { ".", "*" }, "=", expr, ";" ;
 destructure_decl = scope, "(", binding, { ",", binding }, ")", "=", expr, ";" ;
 multi_binding   = scope, binding, ",", binding, { ",", binding }, "=", expr, ";" ;
 binding         = type, identifier ;
@@ -795,7 +869,13 @@ primary         = literal
                 | map
                 | restricted_map ;
 
-call            = identifier, "(", [ expr, { ",", expr } ], ")" ;
+call            = ordinary_call | self_call | spawn_call | send_call
+                | receive_call ;
+ordinary_call   = identifier, "(", [ expr, { ",", expr } ], ")" ;
+self_call       = "self", "(", ")" ;
+spawn_call      = "spawn", "(", ordinary_call, ")" ;
+send_call       = "send", "(", expr, ",", expr, ")" ;
+receive_call    = "receive", "(", type, ")" ;
 remote_call     = identifier, ".", identifier, "(", [ expr, { ",", expr } ],
                   ")" ;
 ffi_call        = "erlang", ".", identifier, ".", identifier, "(",

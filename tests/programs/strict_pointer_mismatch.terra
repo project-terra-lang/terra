@@ -1,0 +1,4 @@
+function strict *SInt Main(*String Args) {
+    local strict *SInt value = *1;
+    return value;
+}

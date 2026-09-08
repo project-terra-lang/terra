@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local const Int difference = 2 - 5;
     local const SInt product = 2 * -3;
     local const Float ratio = 5 / 2;
@@ -6,5 +6,5 @@ function Number Main(String Args) {
     local const Bool comparison = 2 < 2.5;
     local const Int narrowed = Int(3.9);
     local const SInt signed = SInt(-3.9);
-    return difference;
+    return *SInt(difference);
 }

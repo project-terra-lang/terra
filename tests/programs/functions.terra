@@ -11,10 +11,10 @@ function Number FunctionA() {
   return 1;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   FunctionA();
   FunctionA();
   FunctionA;
   local String x, Number y = T();
-  return y;
+  return *SInt(y);
 }

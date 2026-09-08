@@ -5,6 +5,6 @@ function Number Count(Int remaining, Int total) {
     return Count(remaining - 1, total + 1);
 }
 
-function Number Main(String Args) {
-    return Count(200000, 0);
+function strict *SInt Main(*String Args) {
+    return *SInt(Count(200000, 0));
 }

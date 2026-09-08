@@ -1,9 +1,9 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local RestrictedMap limited = RestrictedMap(3, #(:first => 1, :second => 2));
     local Int limited_count = limited.count;
     local List limited_members = limited.members;
     local Map normal = #(:only => 1);
     local Int normal_count = normal.count;
     local List normal_members = normal.members;
-    return limited_count + normal_count;
+    return *SInt(limited_count + normal_count);
 }

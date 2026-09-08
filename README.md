@@ -11,7 +11,7 @@ understandable, and compatible with the Erlang ecosystem.
 
 ## Project Status
 
-- [ ] Concurrent programming language with process and message primitives
+- [x] Concurrent programming language with process and message primitives
 - [x] Immutable-by-default state with temporary-region fake mutability
 - [x] Turing-complete core through conditionals, recursion, and unbounded integers
 - [ ] Small standard library
@@ -49,13 +49,20 @@ For a smaller example:
 Every executable Terra file has one fixed entry point:
 
 ```terra
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     stdout("hello from Terra");
-    return 0;
+    stdout(Args.*);
+    return *SInt(0);
 }
 ```
 
-`Main` must accept `String Args` and return `Number`. Terra has no `void` type,
+`Main` must accept `*String Args` and return `strict *SInt`. The `strict`
+qualifier belongs to that return pointer, not to the function or its body. The
+generated launcher
+creates a temporary region, stores the platform arguments in it, passes their
+pointer to `Main`, dereferences the returned status pointer, and then cleans up
+the region. The BEAM-facing `main/1` therefore returns an ordinary signed
+integer; no temporary pointer escapes its lifetime. Terra has no `void` type,
 so every function returns a real value.
 
 Terra modules can import sibling source files without a package manager:
@@ -63,8 +70,8 @@ Terra modules can import sibling source files without a package manager:
 ```terra
 import math_lib;
 
-function Number Main(String Args) {
-    return math_lib.Add(2, 3);
+function strict *SInt Main(*String Args) {
+    return *SInt(math_lib.Add(2, 3));
 }
 ```
 
@@ -103,9 +110,9 @@ Terra-facing signature at module scope:
 ```terra
 extern Number erlang.lists.sum(List values);
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local List values = [1, 2, 3];
-    return erlang.lists.sum(values);
+    return *SInt(erlang.lists.sum(values));
 }
 ```
 
@@ -122,6 +129,9 @@ declaration are rejected. Values cross the boundary without hidden conversion:
 | `Atom` | atom |
 | `Bool` | `true` or `false` atom |
 | `String` | UTF-8 binary |
+| `Binary` | arbitrary binary |
+| `PID` | process identifier |
+| `Reference` | reference |
 | `List`, `Tuple`, `Map` | list, tuple, map |
 | `RestrictedMap` | `{terra_restricted_map, Capacity, Map}` |
 | `struct Name` | map with `'$terra_struct' => 'Name'` and atom field keys |
@@ -140,9 +150,11 @@ Terra currently supports:
 - Numbers: `Number`, `Int`, `SInt`, and `Float`
 - Scalars: `Atom` and `Bool`
 - Collections: `Map`, `RestrictedMap`, `List`, and `Tuple`
-- Strings: `String`
+- Text and bytes: `String` and `Binary`
+- BEAM handles: `PID` and `Reference`
 - User data: `struct` and `enum`
-- Temporary-region pointers: `*Type`
+- Temporary-region pointers: `*Type`, `**Type`, and deeper pointer types
+- Strict pointer contracts: `strict *Type`
 
 `Var` asks the compiler to infer a concrete type. `State` is reserved as a
 placeholder for future state-machine work.
@@ -170,13 +182,54 @@ local Int port = parse_int("8080");
 local Float ratio = parse_float("0.5");
 local Number count = parse_number("42");
 local String label = to_string(port);
-local String bytes = to_binary(:ready);
+local Binary bytes = to_binary(:ready);
 ```
 
 `parse_int`, `parse_sint`, `parse_float`, and `parse_number` accept `String`
-input and fail explicitly on invalid text. `to_string` and `to_binary` accept
-scalar values. Terra does not yet have a separate `Binary` type; `to_binary`
-currently returns the BEAM-binary string representation.
+input and fail explicitly on invalid text. `to_binary` returns arbitrary BEAM
+bytes as `Binary`; `to_string` returns UTF-8 `String` and accepts `Binary` only
+when its bytes are valid UTF-8.
+
+`PID` and `Reference` are opaque, immutable BEAM values. They have no type
+constructor; `self()` and `spawn(...)` produce PIDs, while typed FFI calls can
+produce either handle. `Map` continues to use a native BEAM map, including
+across FFI and exported-function boundaries.
+
+## Processes and Messages
+
+Terra exposes a small set of BEAM process primitives without adding lambdas or
+a second function model:
+
+```terra
+function Atom Worker(PID parent) {
+    send(parent, :ready);
+    local String reply = receive(String);
+    send(parent, reply);
+    return :done;
+}
+
+function strict *SInt Main(*String Args) {
+    local PID worker = spawn(Worker(self()));
+    local Atom ready = receive(Atom);
+    send(worker, "ack");
+    local String reply = receive(String);
+    return *SInt(1);
+}
+```
+
+`self()` returns the current process PID. `spawn(Function(arguments))` evaluates
+the arguments in the parent and starts that direct Terra function call in a new
+BEAM process. `send(pid, value)` sends one immutable transferable value and
+returns `:ok`. `receive(Type)` blocks for the next mailbox message, validates it
+against the concrete built-in, struct, or enum type, and returns it. A mismatch
+raises `invalid_terra_message` after consuming that message.
+
+Pointers, `Var`, and `State` cannot be sent or captured as spawn arguments.
+When a module uses temporary pointers, each spawned process receives and cleans
+up its own temporary region. These primitives intentionally provide no links,
+monitors, supervisors, registered names, selective patterns, or timeouts; those
+remain available through Erlang/OTP libraries until a smaller Terra abstraction
+proves useful. See [examples/processes.terra](examples/processes.terra).
 
 ## Immutable Variables
 
@@ -186,15 +239,15 @@ Bindings cannot be reassigned after declaration.
 const Int max_players = 64;
 global String region = "eu-west";
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local const Int retries = 3;
     local computed Int attempts = retries + 1;
     local lazy Number delayed = 42;
     local atomic Int counter = 1;
     local thread_local String session = "ready";
     temp String message = session;
-    stdout(message);
-    return attempts;
+    stdout(message, Args.*);
+    return *SInt(attempts);
 }
 ```
 
@@ -225,6 +278,28 @@ local String original = "Ada";
 local *String name = *original;
 ```
 
+Each `*` adds one pointer level. Reads and writes use one `.*` per level:
+
+```terra
+local **Int score = 1;
+score.*.* = 42;
+stdout(score.*.*);
+```
+
+Ordinary pointer declarations may allocate missing pointer levels around a
+compatible value. `strict` qualifies only the outer pointer and requires an
+explicit pointer value whose pointee type matches exactly:
+
+```terra
+local strict *Int exact = *1;
+local strict **Int nested = **1;
+```
+
+For example, `strict *SInt value = *1;` is rejected because `*1` is `*Int`;
+write `*SInt(1)` when that exact pointee type is intended. Strict pointers use
+the same checked temporary-region handles at runtime and still allow aliasing;
+the qualifier is a compile-time construction and type-compatibility contract.
+
 Pointer types may be used in function parameters and returns, function
 arguments, struct fields, and enum payloads. Pointer allocation is allowed only
 for plain `local` declarations; `const`, `global`, and `temp` declarations stay
@@ -237,12 +312,20 @@ declaration:
 temp region(64);
 ```
 
-Without that declaration, the compiler estimates the initial region size from
-the program's pointer-producing expressions and permits growth for repeated or
-recursive calls. A fixed region reports an error if its slot capacity is
-exceeded. The region exists for one `Main` execution and is always cleaned up
-after success or failure. Handles are tagged with their owner process and region;
-stale and cross-process pointers are rejected instead of being dereferenced.
+For an executable, capacity includes the `Main` argument slot and every pointer
+allocated by Terra code, including the returned status pointer. Fixed regions
+must contain at least two slots and may contain at most 65,536 slots per process.
+Without a declaration, the compiler records an allocation estimate and permits
+growth up to the same 65,536-slot safety ceiling. Fixed exhaustion raises
+`terra_temporary_region_full`; automatic exhaustion raises
+`terra_temporary_region_limit`.
+
+Only one region may be active in a process at a time. The region exists for one
+`Main` or spawned-process execution and is always cleaned up after success or
+failure. Handles contain an owning PID, unforgeable region reference, and
+checked non-negative slot. Missing regions, stale slots, malformed handles, and
+cross-process access fail explicitly instead of reaching the underlying map or
+becoming dangling pointers.
 
 Run the complete pointer example with:
 

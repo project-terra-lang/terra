@@ -1,7 +1,7 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     if 1 == 1.0 && 5 / 2 == 2.5 {
-        return Int(7.9) + SInt(-2.8);
+        return *SInt(Int(7.9) + SInt(-2.8));
     } else {
-        return 0;
+        return *SInt(0);
     }
 }

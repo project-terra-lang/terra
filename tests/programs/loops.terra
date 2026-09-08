@@ -27,7 +27,7 @@ function Number LoopDemo(List items) {
   return 0;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   LoopDemo(List());
-  return 0;
+  return *SInt(0);
 }

@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local Int x = 10;
 x = 20;
 }

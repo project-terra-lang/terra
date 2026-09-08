@@ -2,6 +2,6 @@ function (String, Number) T() {
   return "", 69420;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   local Number x, String y = T();
 }

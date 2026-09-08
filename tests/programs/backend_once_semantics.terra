@@ -6,10 +6,10 @@ function Number Normal() {
     return 8;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     Touch;
     Touch;
     Touch();
     Normal();
-    return 7;
+    return *SInt(7);
 }

@@ -6,6 +6,6 @@ function Int Add(Int value, Int extra) {
     return value + extra;
 }
 
-function Number Main(String Args) {
-    return 2 |> Increment() |> Add(3);
+function strict *SInt Main(*String Args) {
+    return *SInt(2 |> Increment() |> Add(3));
 }

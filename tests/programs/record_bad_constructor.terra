@@ -3,7 +3,7 @@ struct Player {
     Int score;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Player player = Player(7, "wrong");
-    return 0;
+    return *SInt(0);
 }

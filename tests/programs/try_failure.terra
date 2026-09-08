@@ -6,6 +6,6 @@ function Float Forward(Int value) {
     return try Divide(value);
 }
 
-function Number Main(String Args) {
-    return try Forward(4);
+function strict *SInt Main(*String Args) {
+    return *SInt(try Forward(4));
 }

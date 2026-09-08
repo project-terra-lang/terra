@@ -1,8 +1,8 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   if true {
     local Int branch_value = 1;
     stdout(branch_value);
   }
 
-  return branch_value;
+  return *SInt(branch_value);
 }

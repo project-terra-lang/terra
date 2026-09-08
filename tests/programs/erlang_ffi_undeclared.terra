@@ -1,6 +1,6 @@
 extern Number erlang.lists.sum(List values);
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local List values = [1, 2, 3];
-    return erlang.lists.reverse(values);
+    return *SInt(erlang.lists.reverse(values));
 }

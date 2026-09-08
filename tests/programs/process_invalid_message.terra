@@ -1,0 +1,9 @@
+export ReadString;
+
+function String ReadString() {
+    return receive(String);
+}
+
+function strict *SInt Main(*String Args) {
+    return *SInt(0);
+}

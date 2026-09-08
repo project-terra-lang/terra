@@ -115,6 +115,11 @@ type_name(map) -> "Map";
 type_name(list) -> "List";
 type_name(tuple) -> "Tuple";
 type_name(string) -> "String";
+type_name(binary) -> "Binary";
+type_name(pid) -> "PID";
+type_name(reference) -> "Reference";
 type_name(var) -> "Var";
+type_name({pointer, Type}) -> ["*", type_name(Type)];
+type_name({strict_pointer, Type}) -> ["strict *", type_name(Type)];
 type_name({named, Name}) -> Name;
 type_name(Type) -> atom_to_list(Type).

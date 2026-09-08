@@ -31,8 +31,8 @@ run_case({Name, Expect}) ->
 tokenizer_rules() ->
     Keywords = "if elseif else unless case for_each for in range while do_while "
                "stdout function fn import export extern struct enum variant bind return try let global local temp region lazy const "
-               "computed atomic thread_local Number Int SInt Float Atom Bool Map "
-               "RestrictedMap List Tuple String State Var Void void True False "
+               "computed atomic thread_local strict Number Int SInt Float Atom Bool Map "
+               "RestrictedMap List Tuple String Binary PID Reference State Var Void void True False "
                "true false null nil _",
     KeywordValues = [Value || {keyword, Value, _Span} <- tokenizer:tokenize(bin(Keywords))],
     ExpectedKeywords = ['if', elseif, 'else', unless, 'case', for_each, 'for', 'in',
@@ -40,8 +40,9 @@ tokenizer_rules() ->
                         struct, enum, variant,
                         bind, return, 'try',
                         'let', global, local, temp, region, lazy, const, computed, atomic,
-                        thread_local, number, int, sint, float, atom, bool, map,
-                        restricted_map, list, tuple, string, state, var, void, void,
+                        thread_local, strict, number, int, sint, float, atom, bool, map,
+                        restricted_map, list, tuple, string, binary, pid, reference,
+                        state, var, void, void,
                         true, false, true, false, null, nil, '_'],
     SymbolKinds = [Kind || {Kind, _Value, _Span} <-
         tokenizer:tokenize(<<"== != <= >= => -> && || |> :: + - * / ( ) = ; : # < > ! , . { } [ ]">>)],
@@ -69,7 +70,7 @@ parser_declaration_rules() ->
         "function Int Ready() {\n"
         "  return 1;\n"
         "}\n"
-        "function Number Main(String Args) {\n"
+        "function strict *SInt Main(*String Args) {\n"
         "  local String label, Number value = Pair(1, \"one\");\n"
         "  local Tuple pair = (1, \"one\");\n"
         "  local (Int id, String name) = pair;\n"
@@ -77,7 +78,7 @@ parser_declaration_rules() ->
         "  Pair(2, \"two\");\n"
         "  Ready;\n"
         "  try Pair(3, \"three\");\n"
-        "  return value;\n"
+        "  return *SInt(value);\n"
         "}\n"),
     Pair = find_function("Pair", Program),
     MainStatements = main_statements(Program),
@@ -93,11 +94,12 @@ parser_declaration_rules() ->
     maps:get(invocation, Repeated) == repeated andalso
     maps:get(invocation, Once) == once andalso
     maps:get(propagation, Try) == 'try' andalso
-    maps:get(values, Return) == [{var_ref, "value"}].
+    maps:get(values, Return) ==
+        [{pointer_new, {call, sint, [{var_ref, "value"}]}}].
 
 parser_control_rules() ->
     {ok, Program} = parse_source(
-        "function Number Main(String Args) {\n"
+        "function strict *SInt Main(*String Args) {\n"
         "  local List items = List(1, 2);\n"
         "  local Atom status = :ready;\n"
         "  for_each item in items { stdout(item); stdout(it); }\n"
@@ -107,7 +109,7 @@ parser_control_rules() ->
         "  if true { stdout(\"if\"); } elseif false { stdout(\"elseif\"); } else { stdout(\"else\"); }\n"
         "  unless false { stdout(\"unless\"); } else { stdout(\"unless else\"); }\n"
         "  if status == { case :ready: stdout(\"ready\"); case: stdout(\"default\"); }\n"
-        "  return 0;\n"
+        "  return *SInt(0);\n"
         "}\n"),
     Statements = main_statements(Program),
     Kinds = [maps:get(kind, Statement) || Statement <- Statements],
@@ -127,12 +129,12 @@ parser_expression_rules() ->
     {ok, Program} = parse_source(
         "function Int Inc(Int value) { return value + 1; }\n"
         "function Int Add(Int left, Int right) { return left + right; }\n"
-        "function Number Main(String Args) {\n"
+        "function strict *SInt Main(*String Args) {\n"
         "  local computed Bool guard = !false || true && 1 + 2 * 3 == 7;\n"
         "  local Int piped = 1 |> Inc() |> Add(3);\n"
         "  local Map data = #(:name => \"Terra\", :version => 1);\n"
         "  local Int count = data.count;\n"
-        "  return piped;\n"
+        "  return *SInt(piped);\n"
         "}\n"),
     Statements = main_statements(Program),
     [Guard, Piped, Map, Count, _Return] = Statements,
@@ -152,92 +154,92 @@ parser_expression_rules() ->
 
 type_checker_rules() ->
     Cases = [{"missing main",
-              "function Number Nope(String Args) { return 0; }\n",
+              "function Number Nope(String Args) { return *SInt(0); }\n",
               missing_entry_point},
              {"invalid main signature",
-              "function Int Main(String Args) { return 0; }\n",
+              "function Int Main(String Args) { return *SInt(0); }\n",
               invalid_entry_point_signature},
              {"duplicate function",
-              "function Number Main(String Args) { return 0; }\n"
-              "function Number Main(String Args) { return 0; }\n",
+              "function strict *SInt Main(*String Args) { return *SInt(0); }\n"
+              "function strict *SInt Main(*String Args) { return *SInt(0); }\n",
               duplicate_entry_point},
              {"void return type",
-              "function void Main(String Args) { return 0; }\n",
+              "function void Main(String Args) { return *SInt(0); }\n",
               void_return_type},
              {"duplicate parameter",
-              "function Number Main(String Args, Int Args) { return 0; }\n",
+              "function Number Main(String Args, Int Args) { return *SInt(0); }\n",
               duplicate_variable},
              {"unknown function",
-              "function Number Main(String Args) { Missing(); return 0; }\n",
+              "function strict *SInt Main(*String Args) { Missing(); return *SInt(0); }\n",
               unknown_function},
              {"unknown variable",
-              "function Number Main(String Args) { return value; }\n",
+              "function strict *SInt Main(*String Args) { return *SInt(value); }\n",
               unknown_variable},
              {"immutable reassignment",
-              "function Number Main(String Args) { local Int x = 1; x = 2; return x; }\n",
+              "function strict *SInt Main(*String Args) { local Int x = 1; x = 2; return *SInt(x); }\n",
               immutable_variable},
              {"non-bool condition",
-              "function Number Main(String Args) { if 1 { return 1; } else { return 0; } }\n",
+              "function strict *SInt Main(*String Args) { if 1 { return *SInt(1); } else { return *SInt(0); } }\n",
               expected_boolean_condition},
              {"non-iterable for_each",
-              "function Number Main(String Args) { for_each x in 1 { stdout(x); } return 0; }\n",
+              "function strict *SInt Main(*String Args) { for_each x in 1 { stdout(x); } return *SInt(0); }\n",
               expected_iterable},
              {"bad range arity",
-              "function Number Main(String Args) { for range(1, 2) { stdout(it); } return 0; }\n",
+              "function strict *SInt Main(*String Args) { for range(1, 2) { stdout(it); } return *SInt(0); }\n",
               range_arity},
              {"return type mismatch",
-              "function Number Main(String Args) { return \"wrong\"; }\n",
+              "function strict *SInt Main(*String Args) { return *\"wrong\"; }\n",
               return_type_mismatch},
              {"missing return",
-              "function Number Main(String Args) { stdout(\"missing\"); }\n",
+              "function strict *SInt Main(*String Args) { stdout(\"missing\"); }\n",
              missing_return},
              {"empty return",
-              "function Number Main(String Args) { return; }\n",
+              "function strict *SInt Main(*String Args) { return; }\n",
               empty_return},
              {"null value",
-              "function Number Main(String Args) { local String x = null; return 0; }\n",
+              "function strict *SInt Main(*String Args) { local String x = null; return *SInt(0); }\n",
               null_not_allowed},
              {"unreachable statement",
-              "function Number Main(String Args) { return 0; stdout(\"late\"); }\n",
+              "function strict *SInt Main(*String Args) { return *SInt(0); stdout(\"late\"); }\n",
               unreachable_statement},
              {"case type mismatch",
-              "function Number Main(String Args) { if 1 == { case \"one\": stdout(\"bad\"); case: stdout(\"ok\"); } return 0; }\n",
+              "function strict *SInt Main(*String Args) { if 1 == { case \"one\": stdout(\"bad\"); case: stdout(\"ok\"); } return *SInt(0); }\n",
               case_type_mismatch},
              {"default case position",
-              "function Number Main(String Args) { if 1 == { case: stdout(\"default\"); case 1: stdout(\"late\"); } return 0; }\n",
+              "function strict *SInt Main(*String Args) { if 1 == { case: stdout(\"default\"); case 1: stdout(\"late\"); } return *SInt(0); }\n",
               default_case_must_be_last},
              {"duplicate case",
-              "function Number Main(String Args) { if 1 == { case 1: stdout(\"a\"); case 1: stdout(\"b\"); case: stdout(\"c\"); } return 0; }\n",
+              "function strict *SInt Main(*String Args) { if 1 == { case 1: stdout(\"a\"); case 1: stdout(\"b\"); case: stdout(\"c\"); } return *SInt(0); }\n",
               duplicate_case},
              {"try target",
-              "function Number Main(String Args) { return try 1; }\n",
+              "function strict *SInt Main(*String Args) { return *SInt(try 1); }\n",
               try_requires_function_call},
              {"pipe target",
-              "function Number Main(String Args) { return 1 |> 2; }\n",
+              "function strict *SInt Main(*String Args) { return *SInt(1 |> 2); }\n",
               pipe_requires_function_call},
              {"invalid numeric conversion",
-              "function Number Main(String Args) { return Int(\"1\"); }\n",
+              "function strict *SInt Main(*String Args) { return *SInt(\"1\"); }\n",
               invalid_numeric_conversion},
              {"restricted map arity",
-              "function Number Main(String Args) { local RestrictedMap x = RestrictedMap(1, Map(), Map()); return 0; }\n",
+              "function strict *SInt Main(*String Args) { local RestrictedMap x = RestrictedMap(1, Map(), Map()); return *SInt(0); }\n",
               restricted_map_arity},
              {"restricted map capacity type",
-              "function Number Main(String Args) { local RestrictedMap x = RestrictedMap(\"1\"); return 0; }\n",
+              "function strict *SInt Main(*String Args) { local RestrictedMap x = RestrictedMap(\"1\"); return *SInt(0); }\n",
               invalid_restricted_map_capacity},
              {"restricted map value type",
-              "function Number Main(String Args) { local RestrictedMap x = RestrictedMap(1, 1); return 0; }\n",
+              "function strict *SInt Main(*String Args) { local RestrictedMap x = RestrictedMap(1, 1); return *SInt(0); }\n",
               invalid_restricted_map_value},
              {"restricted map overflow",
-              "function Number Main(String Args) { local RestrictedMap x = RestrictedMap(1, #(:a => 1, :b => 2)); return 0; }\n",
+              "function strict *SInt Main(*String Args) { local RestrictedMap x = RestrictedMap(1, #(:a => 1, :b => 2)); return *SInt(0); }\n",
               restricted_map_capacity_exceeded},
              {"invalid atomic type",
-              "function Number Main(String Args) { local atomic String x = \"bad\"; return 0; }\n",
+              "function strict *SInt Main(*String Args) { local atomic String x = \"bad\"; return *SInt(0); }\n",
               invalid_atomic_type},
              {"invalid global storage",
-              "function Number Main(String Args) { global computed Int x = 1; return 0; }\n",
+              "function strict *SInt Main(*String Args) { global computed Int x = 1; return *SInt(0); }\n",
               invalid_storage_combination},
              {"global initializer closure",
-              "function Number Main(String Args) { local Int x = 1; global Int y = x; return y; }\n",
+              "function strict *SInt Main(*String Args) { local Int x = 1; global Int y = x; return *SInt(y); }\n",
               global_initializer_not_closed}],
     lists:all(fun({Name, Source, ExpectedCode}) ->
         case parse_source(Source) of
@@ -260,7 +262,7 @@ codegen_rules() ->
     {ok, Program} = parse_source(
         "function Int Inc(Int value) { return value + 1; }\n"
         "function (Int, String) Pair() { return 1, \"one\"; }\n"
-        "function Number Main(String Args) {\n"
+        "function strict *SInt Main(*String Args) {\n"
         "  global Int shared = 1;\n"
         "  local lazy Int delayed = Inc(1);\n"
         "  local computed Int live = delayed + 1;\n"
@@ -281,7 +283,7 @@ codegen_rules() ->
         "  if true { stdout(\"if\"); } else { stdout(\"else\"); }\n"
         "  unless false { stdout(\"unless\"); } else { stdout(\"unless else\"); }\n"
         "  if :ready == { case :ready: stdout(\"ready\"); case: stdout(\"default\"); }\n"
-        "  return piped;\n"
+        "  return *SInt(piped);\n"
         "}\n"),
     {ok, #{source := Source, passes := Passes}} =
         transpiler:codegen_pass(#{module => terra_rule_coverage, program => Program}),

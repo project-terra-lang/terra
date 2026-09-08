@@ -55,7 +55,7 @@ function Number Apply(PlayerCommand command) {
     }
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     -- Each plain local *Type declaration allocates one region slot.
     local *String name = "Guest";
     local *Int score = 10;
@@ -65,7 +65,7 @@ function Number Main(String Args) {
     local PlayerState player = PlayerState(name, score, online);
 
     stdout("session");
-    stdout(Args);
+    stdout(Args.*);
     stdout("initial player");
     stdout(player.name.*);
     stdout(player.score.*);
@@ -107,5 +107,5 @@ function Number Main(String Args) {
     stdout(connected);
     stdout(ignored);
 
-    return snapshot_score;
+    return *SInt(snapshot_score);
 }

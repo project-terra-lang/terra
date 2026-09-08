@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     temp *String value = "nope";
-    return 0;
+    return *SInt(0);
 }

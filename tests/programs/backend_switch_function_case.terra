@@ -11,6 +11,6 @@ function SInt Match(SInt value) {
     }
 }
 
-function Number Main(String Args) {
-    return Match(-100);
+function strict *SInt Main(*String Args) {
+    return *SInt(Match(-100));
 }

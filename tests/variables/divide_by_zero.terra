@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local const Float invalid = 10 / 0;
-    return 0;
+    return *SInt(0);
 }

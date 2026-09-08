@@ -51,7 +51,7 @@ main(_Args) ->
              {"bad signature", "tests/programs/main_bad_signature.terra",
               fun(Result) ->
                   Result =:= {error, {invalid_entry_point_signature,
-                                      "function Number Main(String Args) { ... }"}}
+                                      "function strict *SInt Main(*String Args) { ... }"}}
               end},
              {"void return type", "tests/programs/void_return_type.terra",
               fun(Result) -> Result =:= {error, void_return_type} end},
@@ -147,8 +147,25 @@ main(_Args) ->
               fun(Result) -> element(1, Result) == ok end},
              {"temporary-region pointers", "tests/programs/pointers.terra",
               fun expect_pointers/1},
+             {"nested and strict pointers", "tests/programs/pointer_depth.terra",
+              fun expect_pointer_depth/1},
+             {"strict pointers require explicit construction",
+              "tests/programs/strict_pointer_implicit.terra",
+              fun expect_strict_pointer_implicit/1},
+             {"strict pointers require exact pointee types",
+              "tests/programs/strict_pointer_mismatch.terra",
+              fun expect_strict_pointer_mismatch/1},
+             {"strict applies only to pointers",
+              "tests/programs/strict_non_pointer.terra",
+              fun expect_strict_non_pointer/1},
              {"automatic pointer region", "tests/programs/pointer_auto_region.terra",
               fun expect_auto_pointer_region/1},
+             {"entry region minimum",
+              "tests/programs/region_capacity_too_small.terra",
+              fun expect_region_capacity_too_small/1},
+             {"region safety limit",
+              "tests/programs/region_capacity_too_large.terra",
+              fun expect_region_capacity_too_large/1},
              {"temp pointer storage is rejected", "tests/programs/pointer_bad_temp.terra",
               fun expect_bad_temp_pointer/1},
              {"try propagation expressions", "tests/programs/try_success.terra",
@@ -189,6 +206,24 @@ main(_Args) ->
              {"process-local FFI type",
               "tests/programs/erlang_ffi_pointer.terra",
               fun expect_erlang_ffi_pointer/1},
+             {"opaque BEAM type constructor",
+              "tests/programs/beam_type_constructor.terra",
+              fun expect_beam_type_constructor/1},
+             {"process primitives",
+              "tests/programs/process_primitives.terra",
+              fun expect_process_primitives/1},
+             {"spawn requires a function call",
+              "tests/programs/process_spawn_invalid.terra",
+              fun expect_process_spawn_invalid/1},
+             {"send requires a PID",
+              "tests/programs/process_send_invalid.terra",
+              fun expect_process_send_invalid/1},
+             {"receive requires a transferable type",
+              "tests/programs/process_receive_invalid.terra",
+              fun expect_process_receive_invalid/1},
+             {"spawn rejects pointer arguments",
+              "tests/programs/process_pointer_argument.terra",
+              fun expect_process_pointer_argument/1},
              {"top-level local requires function scope",
               "tests/programs/top_level_local.terra",
               fun expect_top_level_local/1},
@@ -224,9 +259,12 @@ run_case({Name, Path, Expect}) ->
     end.
 
 expect_main_ok({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
     maps:get(kind, Program) == program andalso
     maps:get(entry, Program) == "Main" andalso
-    length(maps:get(functions, Program)) == 1;
+    length(maps:get(functions, Program)) == 1 andalso
+    maps:get(return_types, Main) == [{strict_pointer, sint}] andalso
+    maps:get(params, Main) == [#{type => {pointer, string}, name => "Args"}];
 expect_main_ok(_) ->
     false.
 
@@ -384,7 +422,8 @@ expect_pipe_propagation({ok, Program}) ->
     [Return] = [Statement || Statement <- maps:get(statements, Main),
                              maps:get(kind, Statement) == return],
     maps:get(values, Return) ==
-        [{pipe_call, {pipe_call, {int, 2}, "Increment", []}, "Add", [{int, 3}]}];
+        [{pointer_new, {call, sint,
+          [{pipe_call, {pipe_call, {int, 2}, "Increment", []}, "Add", [{int, 3}]}]}}];
 expect_pipe_propagation(_) -> false.
 
 expect_invalid_pipe({error, {in_function, "Main",
@@ -406,7 +445,8 @@ expect_module_declarations({ok, Program}) ->
     maps:get(value, Inferred) == {binary, plus, {var_ref, "base"}, {int, 1}} andalso
     maps:get(scope, Shared) == global andalso
     maps:get(value, Shared) == {binary, plus, {var_ref, "inferred"}, {int, 4}} andalso
-    maps:get(values, hd(maps:get(statements, Main))) == [{var_ref, "shared"}];
+    maps:get(values, hd(maps:get(statements, Main))) ==
+        [{pointer_new, {call, sint, [{var_ref, "shared"}]}}];
 expect_module_declarations(_) ->
     false.
 
@@ -416,7 +456,8 @@ expect_imports_exports({ok, Program}) ->
     [Value, _Stdout, Return] = maps:get(statements, Main),
     Path == "tests/programs/math_lib.terra" andalso
     maps:get(value, Value) == {remote_call, "math_lib", "Add", [{int, 2}, {int, 3}]} andalso
-    maps:get(values, Return) == [{var_ref, "value"}];
+    maps:get(values, Return) ==
+        [{pointer_new, {call, sint, [{var_ref, "value"}]}}];
 expect_imports_exports(_) ->
     false.
 
@@ -442,7 +483,8 @@ expect_erlang_ffi({ok, Program}) ->
     [_Values, Call, Return] = maps:get(statements, Main),
     maps:get(kind, Call) == ffi_call andalso
     maps:get(values, Return) ==
-        [{ffi_call, "lists", "sum", [{var_ref, "values"}], [number]}];
+        [{pointer_new, {call, sint,
+          [{ffi_call, "lists", "sum", [{var_ref, "values"}], [number]}]}}];
 expect_erlang_ffi(_) ->
     false.
 
@@ -462,6 +504,41 @@ expect_erlang_ffi_duplicate(_) -> false.
 expect_erlang_ffi_pointer(
   {error, {invalid_erlang_ffi_type, {pointer, int}}}) -> true;
 expect_erlang_ffi_pointer(_) -> false.
+
+expect_beam_type_constructor(
+  {error, {in_function, "Main", {type_has_no_constructor, pid}}}) -> true;
+expect_beam_type_constructor(_) -> false.
+
+expect_process_primitives({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    Statements = maps:get(statements, Main),
+    lists:any(fun
+        (#{kind := variable, type := pid,
+           value := {call, "spawn", [{call, "Worker", [{call, "self", []}]}]}}) -> true;
+        (_) -> false
+    end, Statements) andalso
+    lists:any(fun
+        (#{kind := variable, type := string,
+           value := {call, "receive", [{type_spec, string}]}}) -> true;
+        (_) -> false
+    end, Statements);
+expect_process_primitives(_) -> false.
+
+expect_process_spawn_invalid(
+  {error, {in_function, "Main", spawn_requires_function_call}}) -> true;
+expect_process_spawn_invalid(_) -> false.
+
+expect_process_send_invalid(
+  {error, {in_function, "Main", {send_requires_pid, string}}}) -> true;
+expect_process_send_invalid(_) -> false.
+
+expect_process_receive_invalid(
+  {error, {in_function, "Main", {invalid_process_value_type, state}}}) -> true;
+expect_process_receive_invalid(_) -> false.
+
+expect_process_pointer_argument(
+  {error, {in_function, "Main", {invalid_process_value_type, {pointer, int}}}}) -> true;
+expect_process_pointer_argument(_) -> false.
 
 expect_top_level_local({error, {variable_requires_scope, local}}) ->
     true;
@@ -559,12 +636,14 @@ expect_passes({ok, Program}) ->
 expect_passes(_) ->
     false.
 
-expect_missing_return({error, {in_function, "Main", {missing_return, [number]}}}) ->
+expect_missing_return(
+  {error, {in_function, "Main", {missing_return, [{strict_pointer, sint}]}}}) ->
     true;
 expect_missing_return(_) ->
     false.
 
-expect_partial_branch_return({error, {in_function, "Main", {missing_return, [number]}}}) ->
+expect_partial_branch_return(
+  {error, {in_function, "Main", {missing_return, [{strict_pointer, sint}]}}}) ->
     true;
 expect_partial_branch_return(_) ->
     false.
@@ -626,7 +705,7 @@ expect_conversions({ok, Program}) ->
     lists:any(fun(Statement) ->
         maps:get(kind, Statement, none) == variable andalso
         maps:get(name, Statement, none) == "atom_text" andalso
-        maps:get(type, Statement, none) == string andalso
+        maps:get(type, Statement, none) == binary andalso
         maps:get(value, Statement, none) == {call, "to_binary", [{atom, ready}]}
     end, Statements);
 expect_conversions(_) ->
@@ -648,9 +727,36 @@ expect_pointers({ok, Program}) ->
     maps:get(region_capacity, Program) == {fixed, 4};
 expect_pointers(_) -> false.
 
+expect_pointer_depth({ok, Program}) ->
+    Main = find_function("Main", maps:get(functions, Program)),
+    maps:get(return_types, Main) == [{strict_pointer, sint}] andalso
+    maps:get(region_capacity, Program) == {auto, 5, 65536};
+expect_pointer_depth(_) -> false.
+
+expect_strict_pointer_implicit(
+  {error, {in_function, "Main", {strict_pointer_mismatch, int, int}}}) -> true;
+expect_strict_pointer_implicit(_) -> false.
+
+expect_strict_pointer_mismatch(
+  {error, {in_function, "Main",
+           {strict_pointer_mismatch, sint, {pointer, int}}}}) -> true;
+expect_strict_pointer_mismatch(_) -> false.
+
+expect_strict_non_pointer(
+  {error, {in_function, "Main", strict_requires_pointer}}) -> true;
+expect_strict_non_pointer(_) -> false.
+
 expect_auto_pointer_region({ok, Program}) ->
-    maps:get(region_capacity, Program) == {auto, 1};
+    maps:get(region_capacity, Program) == {auto, 3, 65536};
 expect_auto_pointer_region(_) -> false.
+
+expect_region_capacity_too_small(
+  {error, {region_capacity_too_small, 1, 2}}) -> true;
+expect_region_capacity_too_small(_) -> false.
+
+expect_region_capacity_too_large(
+  {error, {region_capacity_too_large, 65537, 65536}}) -> true;
+expect_region_capacity_too_large(_) -> false.
 
 expect_bad_temp_pointer(
   {error, {in_function, "Main", {invalid_pointer_storage, temp, runtime}}}) -> true;

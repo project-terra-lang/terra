@@ -2,7 +2,7 @@ function (String, Number) Pair() {
     return "ok", 1;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local String value, Number value = Pair();
-    return 0;
+    return *SInt(0);
 }

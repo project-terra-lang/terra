@@ -1,12 +1,12 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Int int_value = parse_int("12");
     local SInt sint_value = parse_sint("-2");
     local Float float_value = parse_float("3.5");
     local Number number_value = parse_number("4");
     local String int_text = to_string(int_value);
-    local String atom_text = to_binary(:ready);
-    local String same_text = to_string(Args);
+    local Binary atom_text = to_binary(:ready);
+    local String same_text = to_string(Args.*);
 
     stdout(int_text, atom_text, same_text, to_string(true), to_string(float_value));
-    return int_value + sint_value + number_value;
+    return *SInt(int_value + sint_value + number_value);
 }

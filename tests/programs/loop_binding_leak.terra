@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   local List items = [1, 2];
 
   for_each item in items {
@@ -7,5 +7,5 @@ function Number Main(String Args) {
     stdout(loop_value);
   }
 
-  return it;
+  return *SInt(it);
 }

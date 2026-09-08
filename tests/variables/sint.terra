@@ -1,6 +1,6 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local SInt debt = -5;
 local SInt count = 5;
 local Number score = debt;
-return 0;
+return *SInt(0);
 }

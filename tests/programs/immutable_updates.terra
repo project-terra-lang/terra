@@ -3,16 +3,16 @@ struct Player {
     Int score;
 }
 
-function Number Main(String Args) {
-    local Player player = Player(Args, 1);
+function strict *SInt Main(*String Args) {
+    local Player player = Player(Args.*, 1);
     local Player updated_player = player{ score = 4 };
 
     local Map data = #(:score => 1, :name => "old");
-    local Map updated_data = data{ :score => updated_player.score, :name => Args };
+    local Map updated_data = data{ :score => updated_player.score, :name => Args.* };
 
     local RestrictedMap limited = RestrictedMap(3, #(:first => 1, :second => 2));
     local RestrictedMap updated_limited = limited{ :second => 3, :third => 4 };
 
     stdout(updated_player.name, updated_data.name, updated_data.score, updated_limited.members);
-    return updated_player.score + updated_limited.count;
+    return *SInt(updated_player.score + updated_limited.count);
 }

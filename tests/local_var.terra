@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local Number x = 10;
 local Atom match = :z;
 local Bool is_x = True;

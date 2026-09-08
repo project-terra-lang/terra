@@ -1,0 +1,15 @@
+struct PointerBox {
+    strict **Int value;
+}
+
+function strict **Int Identity(strict **Int value) {
+    return value;
+}
+
+function strict *SInt Main(*String Args) {
+    local ***Int nested = 1;
+    nested.*.*.* = 7;
+    local strict **Int exact = Identity(nested.*);
+    local PointerBox box = PointerBox(exact);
+    return *SInt(box.value.*.*);
+}

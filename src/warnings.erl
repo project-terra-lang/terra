@@ -24,7 +24,7 @@ analyze_statement(#{kind := multi_binding, bindings := Bindings, value := Value}
     end, analyze_expr(Value, State), Bindings);
 analyze_statement(#{kind := call, name := Name, args := Args}, State) ->
     State1 = analyze_exprs(Args, State),
-    case is_list(Name) of
+    case is_list(Name) andalso Name =/= "send" of
         true -> add_warning(ignored_return_value, #{callee => Name}, State1);
         false -> State1
     end;

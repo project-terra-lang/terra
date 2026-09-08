@@ -3,7 +3,12 @@
 
 -file("tests/programs/module_declarations.terra", 5).
 main(Args) ->
-    terra_fn_main(terra_args(Args)).
+    TerraRegion = terra_region_start({auto, 2, 65536}),
+    try
+        TerraArgsPointer = terra_pointer_new(terra_args(Args)),
+        TerraExitPointer = terra_fn_main(TerraArgsPointer),
+        terra_main_exit(terra_pointer_read(TerraExitPointer))
+    after terra_region_cleanup(TerraRegion) end.
 
 -file("tests/programs/module_declarations.terra", 5).
 terra_fn_main(Terra_Args_1) ->
@@ -11,8 +16,8 @@ terra_fn_main(Terra_Args_1) ->
         Terra_base_2 = 2,
         Terra_inferred_3 = (Terra_base_2 + 1),
         Terra_shared_4 = terra_global("shared", fun() -> (Terra_inferred_3 + 4) end),
-        throw({terra_return, Terra_shared_4}),
-        0
+        throw({terra_return, terra_pointer_new(terra_to_sint(Terra_shared_4))}),
+        undefined
     catch
         throw:{terra_return, TerraReturnValue} -> TerraReturnValue
     end.
@@ -20,6 +25,9 @@ terra_fn_main(Terra_Args_1) ->
 -file("terra_runtime", 1).
 terra_args(Value) when is_binary(Value) -> Value;
 terra_args(Value) -> unicode:characters_to_binary(Value).
+
+terra_main_exit(Value) when is_integer(Value) -> Value;
+terra_main_exit(Value) -> erlang:error({invalid_main_exit_value, Value}).
 
 terra_ffi_return(Expected, Module, Function, Value) ->
     case terra_ffi_valid(Expected, Value) of
@@ -33,7 +41,14 @@ terra_ffi_valid(sint, Value) -> is_integer(Value);
 terra_ffi_valid(float, Value) -> is_float(Value);
 terra_ffi_valid(atom, Value) -> is_atom(Value);
 terra_ffi_valid(bool, Value) -> Value =:= true orelse Value =:= false;
-terra_ffi_valid(string, Value) -> is_binary(Value);
+terra_ffi_valid(string, Value) when is_binary(Value) ->
+    case unicode:characters_to_binary(Value) of
+        Value -> true;
+        _ -> false
+    end;
+terra_ffi_valid(binary, Value) -> is_binary(Value);
+terra_ffi_valid(pid, Value) -> is_pid(Value);
+terra_ffi_valid(reference, Value) -> is_reference(Value);
 terra_ffi_valid(list, Value) -> is_list(Value);
 terra_ffi_valid(tuple, Value) -> is_tuple(Value);
 terra_ffi_valid(map, Value) -> is_map(Value);
@@ -97,11 +112,16 @@ terra_parse_number(Value) when is_binary(Value) ->
         catch _:_ -> erlang:error({invalid_conversion, string, number, Value}) end
     end.
 
-terra_to_string(Value) when is_binary(Value) -> Value;
+terra_to_string(Value) when is_binary(Value) ->
+    case unicode:characters_to_binary(Value) of
+        Value -> Value;
+        _ -> erlang:error({invalid_conversion, binary, string, Value})
+    end;
 terra_to_string(Value) when is_integer(Value) -> integer_to_binary(Value);
 terra_to_string(Value) when is_float(Value) -> float_to_binary(Value, [short]);
 terra_to_string(Value) when is_atom(Value) -> atom_to_binary(Value, utf8).
 
+terra_to_binary(Value) when is_binary(Value) -> Value;
 terra_to_binary(Value) -> terra_to_string(Value).
 
 terra_global(Key, Fun) ->
@@ -237,3 +257,100 @@ terra_member(Value, count) when is_map(Value) -> map_size(Value);
 terra_member(Value, members) when is_map(Value) -> maps:to_list(Value);
 terra_member(Value, Key) when is_map(Value) -> maps:get(Key, Value);
 terra_member(Value, Key) -> erlang:error({cannot_access_member, Key, Value}).
+
+terra_spawn(Fun, Args) ->
+    spawn(fun() ->
+        TerraRegion = terra_region_start({auto, 2, 65536}),
+        try erlang:apply(Fun, Args) after terra_region_cleanup(TerraRegion) end
+    end).
+
+terra_send(Pid, Value) ->
+    Pid ! Value,
+    ok.
+
+terra_receive(Expected) ->
+    receive
+        Value ->
+            case terra_ffi_valid(Expected, Value) of
+                true -> Value;
+                false -> erlang:error({invalid_terra_message, Expected, Value})
+            end
+    end.
+
+terra_region_start(Capacity) ->
+    case erlang:get({?MODULE, terra_current_region}) of
+        undefined -> terra_region_start_new(Capacity);
+        _ -> erlang:error(terra_region_already_active)
+    end.
+
+terra_region_start_new(Capacity)
+  when is_integer(Capacity), Capacity >= 0, Capacity =< 65536 ->
+    terra_region_store(Capacity);
+terra_region_start_new({auto, Estimate, 65536} = Capacity)
+  when is_integer(Estimate), Estimate >= 0, Estimate =< 65536 ->
+    terra_region_store(Capacity);
+terra_region_start_new(Capacity) ->
+    erlang:error({terra_invalid_region_capacity, Capacity}).
+
+terra_region_store(Capacity) ->
+    Ref = make_ref(),
+    Key = {?MODULE, terra_region, Ref},
+    erlang:put(Key, #{capacity => Capacity, next => 0, values => #{}}),
+    erlang:put({?MODULE, terra_current_region}, Ref),
+    Ref.
+
+terra_region_cleanup(Ref) ->
+    erlang:erase({?MODULE, terra_region, Ref}),
+    case erlang:get({?MODULE, terra_current_region}) of
+        Ref -> erlang:erase({?MODULE, terra_current_region});
+        _ -> ok
+    end,
+    ok.
+
+terra_pointer_new(Value) ->
+    case erlang:get({?MODULE, terra_current_region}) of
+        undefined -> erlang:error(terra_pointer_outside_region);
+        Ref ->
+            Key = {?MODULE, terra_region, Ref},
+            case erlang:get(Key) of
+                Region when is_map(Region) ->
+                    Slot = maps:get(next, Region),
+                    terra_region_require_capacity(maps:get(capacity, Region), Slot),
+                    Values = maps:put(Slot, Value, maps:get(values, Region)),
+                    erlang:put(Key, Region#{next := Slot + 1, values := Values}),
+                    {terra_pointer, self(), Ref, Slot};
+                _ -> erlang:error(terra_dangling_pointer)
+            end
+    end.
+
+terra_region_require_capacity({auto, _Estimate, Limit}, Slot) when Slot < Limit -> ok;
+terra_region_require_capacity({auto, _Estimate, Limit}, _Slot) ->
+    erlang:error({terra_temporary_region_limit, Limit});
+terra_region_require_capacity(Capacity, Slot) when Slot < Capacity -> ok;
+terra_region_require_capacity(Capacity, _Slot) ->
+    erlang:error({terra_temporary_region_full, Capacity}).
+
+terra_pointer_read(Pointer) ->
+    {_Key, Slot, Region} = terra_pointer_region(Pointer),
+    case maps:find(Slot, maps:get(values, Region)) of
+        {ok, Value} -> Value;
+        error -> erlang:error(terra_dangling_pointer)
+    end.
+
+terra_pointer_write(Pointer, Value) ->
+    {Key, Slot, Region} = terra_pointer_region(Pointer),
+    Values = maps:put(Slot, Value, maps:get(values, Region)),
+    erlang:put(Key, Region#{values := Values}),
+    Value.
+
+terra_pointer_region({terra_pointer, Owner, Ref, Slot})
+  when Owner == self(), is_reference(Ref), is_integer(Slot), Slot >= 0 ->
+    Key = {?MODULE, terra_region, Ref},
+    case erlang:get(Key) of
+        Region when is_map(Region) -> {Key, Slot, Region};
+        _ -> erlang:error(terra_dangling_pointer)
+    end;
+terra_pointer_region({terra_pointer, Owner, Ref, Slot})
+  when is_pid(Owner), is_reference(Ref), is_integer(Slot), Slot >= 0 ->
+    erlang:error(terra_cross_process_pointer);
+terra_pointer_region(_) -> erlang:error(terra_invalid_pointer).

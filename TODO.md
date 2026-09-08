@@ -7,7 +7,7 @@ new features should arrive in small, understandable steps.
 
 ## Current Baseline
 
-- [x] Fixed `function Number Main(String Args)` entry point
+- [x] Fixed `function strict *SInt Main(*String Args)` temporary-region entry point
 - [x] Immutable variables, type inference, shadowing, lazy and computed values
 - [x] Tuple destructuring and multiple function return values
 - [x] Functions, checked calls, recursion, and once-only calls
@@ -65,8 +65,8 @@ new features should arrive in small, understandable steps.
 - [x] Add an explicit Erlang FFI for calling selected Erlang modules/functions
 - [x] Map Terra values predictably to Erlang terms
 - [x] Allow Erlang code to call exported Terra functions
-- [ ] Support the BEAM types Terra needs most: binaries, PIDs, references, and maps
-- [ ] Add lightweight process spawning and message send/receive as language/library
+- [x] Support the BEAM types Terra needs most: binaries, PIDs, references, and maps
+- [x] Add lightweight process spawning and message send/receive as language/library
       primitives
 - [ ] Keep OTP integration library-first unless syntax clearly earns its place
 

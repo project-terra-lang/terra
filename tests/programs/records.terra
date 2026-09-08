@@ -16,9 +16,9 @@ function Int PlayerScore(Player player) {
     return player.score;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Player player = MakePlayer("Ada", 7);
     local Team team = Team("Blue", player);
-    stdout(team.label, team.captain.name, Args);
-    return PlayerScore(team.captain);
+    stdout(team.label, team.captain.name, Args.*);
+    return *SInt(PlayerScore(team.captain));
 }

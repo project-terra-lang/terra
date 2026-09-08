@@ -10,8 +10,8 @@ function Int CountUp(Int current, Int limit) {
     return CountUp(current + 1, limit);
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     stdout("Terra counter");
-    stdout(Args);
-    return CountUp(1, 5);
+    stdout(Args.*);
+    return *SInt(CountUp(1, 5));
 }

@@ -1,6 +1,6 @@
 -- INVALID TOKEN [invalid_token] ----- tests/programs/invalid_token.terra:2:3
 
-  1 | function Number Main(String Args) {
+  1 | function strict *SInt Main(*String Args) {
 > 2 |   @
    |   ^
   3 | }

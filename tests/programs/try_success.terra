@@ -6,8 +6,8 @@ function Int Observe(Int value) {
     return value;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Int value = try Add(2, 3);
     try Observe(value);
-    return value;
+    return *SInt(value);
 }

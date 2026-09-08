@@ -2,12 +2,12 @@ enum Pair {
     variant Both(Int left, Int right);
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Pair pair = Pair.Both(1, 2);
     if pair == {
         case Pair.Both(bind value, bind value):
-            return value;
+            return *SInt(value);
         case:
-            return 0;
+            return *SInt(0);
     }
 }

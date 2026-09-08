@@ -2,7 +2,7 @@ enum Result {
     variant Ok(Int value);
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Result result = Result.Ok(7);
     if result == {
         case Result.Ok(bind value):
@@ -10,5 +10,5 @@ function Number Main(String Args) {
         case:
             stdout(0);
     }
-    return value;
+    return *SInt(value);
 }

@@ -2,12 +2,12 @@ enum Result {
     variant Error(String message);
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Result result = Result.Error("ignored");
     if result == {
         case Result.Error(_):
-            return 3;
+            return *SInt(3);
         case:
-            return 0;
+            return *SInt(0);
     }
 }

@@ -14,7 +14,7 @@ function Number Touch() {
   return 1;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   local String label, Number value = Pair();
 
   if value == 7 {
@@ -42,5 +42,5 @@ function Number Main(String Args) {
   Touch;
   Touch;
   Countdown(3);
-  return value;
+  return *SInt(value);
 }

@@ -6,10 +6,10 @@ function Bool Below(Int value, Float limit) {
     return value < limit;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     if Below(2, 2.5) {
-        return Ratio(6, -1);
+        return *SInt(Ratio(6, -1));
     } else {
-        return Int(0.0);
+        return *SInt(Int(0.0));
     }
 }

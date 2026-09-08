@@ -29,7 +29,7 @@ function Number Control() {
   return x;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   Control();
-  return 0;
+  return *SInt(0);
 }

@@ -1,7 +1,7 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local List items = [1, 2];
     for_each it in items {
         stdout(it);
     }
-    return 0;
+    return *SInt(0);
 }

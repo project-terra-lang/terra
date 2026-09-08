@@ -1,9 +1,9 @@
 -- MISSING RETURN [missing_return] --- tests/programs/missing_return.terra:1:1
 
-> 1 | function Number Main(String Args) {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 1 | function strict *SInt Main(*String Args) {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   2 |   stdout("no return");
 
-In function Main: This function must return (Number) on every path.
+In function Main: This function must return (strict *SInt) on every path.
 
 Hint: Add an explicit return, or make every if/unless/switch branch return.

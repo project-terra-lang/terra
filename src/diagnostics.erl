@@ -25,11 +25,11 @@ format({read_failed, Reason}) ->
 format(missing_entry_point) ->
     {missing_entry_point,
      "No Main function was found.",
-     "Add: function Number Main(String Args) { ... }"};
+     "Add: function strict *SInt Main(*String Args) { ... }"};
 format(duplicate_entry_point) ->
     {duplicate_entry_point,
      "More than one Main function was defined.",
-     "Keep exactly one function Number Main(String Args)."};
+     "Keep exactly one function strict *SInt Main(*String Args)."};
 format({duplicate_function, Name}) ->
     {duplicate_function,
      io_lib:format("Function ~s is defined more than once.", [Name]),
@@ -129,6 +129,15 @@ format({pointer_type_mismatch, Expected, Actual}) ->
      io_lib:format("This pointer stores ~s, but the value is ~s.",
                    [type_name(Expected), type_name(Actual)]),
      "Initialize or write the pointer with a value matching its pointee type."};
+format({strict_pointer_mismatch, Expected, Actual}) ->
+    {strict_pointer_mismatch,
+     io_lib:format("A strict pointer to ~s requires an explicit pointer with that exact pointee type, but received ~s.",
+                   [type_name(Expected), type_name(Actual)]),
+     "Create the pointer explicitly with * and make its pointee type match exactly."};
+format(strict_requires_pointer) ->
+    {strict_requires_pointer,
+     "The strict qualifier applies only to pointer types.",
+     "Write strict *Type, with one or more pointer stars."};
 format({dereference_non_pointer, Type}) ->
     {dereference_non_pointer,
      io_lib:format("The .* helper requires a pointer, but this value is ~s.",
@@ -221,6 +230,10 @@ format({invalid_erlang_export_type, Name, Type}) ->
      io_lib:format("Exported function ~s uses boundary-unsafe type ~s.",
                    [Name, type_name(Type)]),
      "Use concrete Erlang-mapped parameters and returns for exported functions."};
+format({type_has_no_constructor, Type}) ->
+    {type_has_no_constructor,
+     io_lib:format("~s does not have a value constructor.", [type_name(Type)]),
+     "Use to_binary for Binary or obtain PID/Reference values from a typed BEAM call."};
 format({function_call_required, Name}) ->
     {function_call_required,
      io_lib:format("~s names a user-defined type, not a function.", [name(Name)]),
@@ -360,6 +373,42 @@ format({invalid_conversion_argument, Name, Type}) ->
      io_lib:format("Conversion helper ~s does not accept ~s.",
                    [Name, type_name(Type)]),
      "Use a scalar Number, Int, SInt, Float, Atom, Bool, or String value."};
+format({region_capacity_too_small, Capacity, Minimum}) ->
+    {region_capacity_too_small,
+     io_lib:format("Temporary region capacity ~p is below the entry minimum of ~p slots.",
+                   [Capacity, Minimum]),
+     "Reserve at least one slot for Main Args and one for its returned SInt pointer."};
+format({region_capacity_too_large, Capacity, Maximum}) ->
+    {region_capacity_too_large,
+     io_lib:format("Temporary region capacity ~p exceeds the safe limit of ~p slots.",
+                   [Capacity, Maximum]),
+     "Choose a capacity at or below the documented per-process safety limit."};
+format({automatic_region_too_large, Estimate, Maximum}) ->
+    {automatic_region_too_large,
+     io_lib:format("The compiler estimates ~p pointer slots, above the safe limit of ~p.",
+                   [Estimate, Maximum]),
+     "Reduce pointer allocations or split the work across shorter-lived processes."};
+format({process_primitive_arity, Name, Expected, Actual}) ->
+    {process_primitive_arity,
+     io_lib:format("Process primitive ~s expects ~p argument(s), but received ~p.",
+                   [Name, Expected, Actual]),
+     "Use self(), spawn(Function(arguments)), send(pid, value), or receive(Type)."};
+format(spawn_requires_function_call) ->
+    {spawn_requires_function_call,
+     "spawn expects one direct Terra function call.",
+     "Write spawn(Worker(arguments)); lambdas and function values are not required."};
+format({send_requires_pid, Type}) ->
+    {send_requires_pid,
+     io_lib:format("send expects a PID first, but received ~s.", [type_name(Type)]),
+     "Pass a PID returned by self(), spawn(...), receive(PID), or typed Erlang FFI."};
+format({invalid_process_value_type, Type}) ->
+    {invalid_process_value_type,
+     io_lib:format("~s cannot cross a Terra process boundary.", [type_name(Type)]),
+     "Send immutable BEAM values; temporary pointers, State, and Var stay process-local."};
+format({unknown_message_type, Name}) ->
+    {unknown_message_type,
+     io_lib:format("Message type ~s is not defined.", [Name]),
+     "Use a built-in concrete type or a declared struct or enum in receive(Type)."};
 format({restricted_map_arity, Actual}) ->
     {restricted_map_arity,
      io_lib:format("RestrictedMap expects one or two arguments, but received ~p.",
@@ -915,9 +964,13 @@ type_name(restricted_map) -> "RestrictedMap";
 type_name(list) -> "List";
 type_name(tuple) -> "Tuple";
 type_name(string) -> "String";
+type_name(binary) -> "Binary";
+type_name(pid) -> "PID";
+type_name(reference) -> "Reference";
 type_name(var) -> "Var";
 type_name({named, Name}) -> Name;
 type_name({pointer, Type}) -> ["*", type_name(Type)];
+type_name({strict_pointer, Type}) -> ["strict *", type_name(Type)];
 type_name(Type) -> io_lib:format("~p", [Type]).
 
 statement_name('if') -> "if";

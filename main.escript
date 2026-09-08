@@ -95,6 +95,9 @@ display_type(restricted_map) -> "RestrictedMap";
 display_type(list)   -> "List";
 display_type(tuple)  -> "Tuple";
 display_type(string) -> "String";
+display_type(binary) -> "Binary";
+display_type(pid) -> "PID";
+display_type(reference) -> "Reference";
 display_type(Type)   -> atom_to_list(Type).
 
 print_tokens(Path) ->

@@ -1,7 +1,7 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Number nice_number = 69420;
     stdout("nice!", nice_number);
-    local String args = Args;
+    local String args = Args.*;
     stdout("Command Line Arguments Are: ", args);
-    return nice_number;
+    return *SInt(nice_number);
 }

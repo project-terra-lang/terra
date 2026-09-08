@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     if 1 == {
         case 1:
             stdout(1);
@@ -7,5 +7,5 @@ function Number Main(String Args) {
         case:
             stdout(0);
     }
-    return 0;
+    return *SInt(0);
 }

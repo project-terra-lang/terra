@@ -2,7 +2,7 @@ enum Result {
     variant Ok(Int value);
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Result result = Result.Ok("wrong");
-    return 0;
+    return *SInt(0);
 }

@@ -3,7 +3,7 @@ function Number First() {
     return shared;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     global Int shared = 2;
-    return shared;
+    return *SInt(shared);
 }

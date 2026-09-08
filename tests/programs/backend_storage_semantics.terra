@@ -2,12 +2,12 @@ function (Int, Int) Pair() {
     return 5, 6;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     global Int shared = 11;
     local thread_local Int session = 22;
     local atomic Int local_counter = 3;
     global atomic Int global_counter = 4;
     global Int first, Int second = Pair();
     local computed Int total = shared + session + local_counter + global_counter + first + second;
-    return total + total;
+    return *SInt(total + total);
 }

@@ -3,7 +3,7 @@ function Number Reenter() {
     return 1;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     Reenter;
-    return 0;
+    return *SInt(0);
 }

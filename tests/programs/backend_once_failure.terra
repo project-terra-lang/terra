@@ -2,7 +2,7 @@ function Float Fail() {
     return 1 / 0;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     Fail;
-    return 0;
+    return *SInt(0);
 }

@@ -1,0 +1,46 @@
+export EchoBinary;
+export EchoPID;
+export EchoReference;
+export EchoMap;
+
+extern PID erlang.erlang.self();
+extern Reference erlang.erlang.make_ref();
+extern Bool erlang.erlang.is_pid(PID value);
+extern Bool erlang.erlang.is_reference(Reference value);
+extern Bool erlang.erlang.is_binary(Binary value);
+extern Map erlang.maps.put(Atom key, Bool value, Map input);
+extern Bool erlang.maps.is_key(Atom key, Map input);
+
+function Binary EchoBinary(Binary value) {
+    return value;
+}
+
+function PID EchoPID(PID value) {
+    return value;
+}
+
+function Reference EchoReference(Reference value) {
+    return value;
+}
+
+function Map EchoMap(Map value) {
+    return value;
+}
+
+function strict *SInt Main(*String Args) {
+    local Binary bytes = to_binary("Terra");
+    local String text = to_string(bytes);
+    local PID owner = erlang.erlang.self();
+    local Reference marker = erlang.erlang.make_ref();
+    local Map state = erlang.maps.put(:ready, true, #());
+
+    if erlang.erlang.is_binary(bytes) &&
+       erlang.erlang.is_pid(owner) &&
+       erlang.erlang.is_reference(marker) &&
+       erlang.maps.is_key(:ready, state) &&
+       text == "Terra" {
+        return *SInt(state.count);
+    } else {
+        return *SInt(0);
+    }
+}

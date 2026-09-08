@@ -2,6 +2,6 @@ enum Result {
     Ok(Int value);
 }
 
-function Number Main(String Args) {
-    return 0;
+function strict *SInt Main(*String Args) {
+    return *SInt(0);
 }

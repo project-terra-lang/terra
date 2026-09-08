@@ -2,5 +2,5 @@ function (String, Number) T() {
   return 1, "wrong order";
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 }

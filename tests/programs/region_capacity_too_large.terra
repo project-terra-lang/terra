@@ -1,0 +1,5 @@
+temp region(65537);
+
+function strict *SInt Main(*String Args) {
+    return *SInt(0);
+}

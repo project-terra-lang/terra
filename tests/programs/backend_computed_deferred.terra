@@ -1,4 +1,4 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local computed Float unused = 1 / 0;
-    return 7;
+    return *SInt(7);
 }

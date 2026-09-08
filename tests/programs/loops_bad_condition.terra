@@ -1,6 +1,6 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   while 10 {
     stdout(it);
   }
-  return 0;
+  return *SInt(0);
 }

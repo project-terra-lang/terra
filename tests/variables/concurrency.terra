@@ -1,6 +1,6 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 global atomic Int counter = 0;
 local thread_local String session = "abc";
 local Int snapshot = counter;
-return 0;
+return *SInt(0);
 }

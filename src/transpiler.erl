@@ -132,7 +132,7 @@ generate_module(Module, #{functions := Functions} = Program) ->
     SourcePath = maps:get(source_path, Program, "terra_source"),
     ModuleDeclarations = maps:get(module_declarations, Program, []),
     MainLine = function_source_line("Main", Functions),
-    RegionCapacity = maps:get(region_capacity, Program, {auto, 0}),
+    RegionCapacity = maps:get(region_capacity, Program, {auto, 0, 65536}),
     UsesPointers = uses_pointer_region(RegionCapacity),
     ["-module(", atom_to_list(Module), ").\n",
      "-export([", export_entries(Program), "]).\n\n",
@@ -143,10 +143,11 @@ generate_module(Module, #{functions := Functions} = Program) ->
      || Function <- Functions],
      "-file(\"terra_runtime\", 1).\n",
      runtime_helpers(),
+     process_runtime_helpers(RegionCapacity, UsesPointers),
      case UsesPointers of true -> pointer_runtime_helpers(); false -> "" end].
 
 uses_pointer_region({fixed, _Capacity}) -> true;
-uses_pointer_region({auto, Estimate}) -> Estimate > 0.
+uses_pointer_region({auto, Estimate, _Limit}) -> Estimate > 0.
 
 export_entries(#{entry := Entry, exports := Exports, functions := Functions}) ->
     MainExports = case Entry of
@@ -212,13 +213,17 @@ main_wrapper(none, _Capacity, _UsesPointers) ->
 main_wrapper(_Entry, Capacity, true) ->
     ["main(Args) ->\n",
      "    TerraRegion = terra_region_start(", region_capacity(Capacity), "),\n",
-     "    try terra_fn_main(terra_args(Args))\n",
+     "    try\n",
+     "        TerraArgsPointer = terra_pointer_new(terra_args(Args)),\n",
+     "        TerraExitPointer = terra_fn_main(TerraArgsPointer),\n",
+     "        terra_main_exit(terra_pointer_read(TerraExitPointer))\n",
      "    after terra_region_cleanup(TerraRegion) end.\n\n"];
 main_wrapper(_Entry, _Capacity, false) ->
     "main(Args) ->\n    terra_fn_main(terra_args(Args)).\n\n".
 
 region_capacity({fixed, Capacity}) -> integer_to_list(Capacity);
-region_capacity({auto, Estimate}) -> ["{auto, ", integer_to_list(Estimate), "}"].
+region_capacity({auto, Estimate, Limit}) ->
+    ["{auto, ", integer_to_list(Estimate), ", ", integer_to_list(Limit), "}"].
 
 function_source_line(Name, Functions) ->
     case [maps:get(source_line, Function, 1) || Function <- Functions,
@@ -323,6 +328,10 @@ is_intrinsic_call("parse_float") -> true;
 is_intrinsic_call("parse_number") -> true;
 is_intrinsic_call("to_string") -> true;
 is_intrinsic_call("to_binary") -> true;
+is_intrinsic_call("self") -> true;
+is_intrinsic_call("spawn") -> true;
+is_intrinsic_call("send") -> true;
+is_intrinsic_call("receive") -> true;
 is_intrinsic_call(_Name) -> false.
 
 bind_parameters([], Counter, Names, Env) ->
@@ -700,6 +709,22 @@ function_call("to_string", [Arg], Env) ->
     ["terra_to_string(", expression(Arg, Env), ")"];
 function_call("to_binary", [Arg], Env) ->
     ["terra_to_binary(", expression(Arg, Env), ")"];
+function_call("self", [], _Env) -> "self()";
+function_call("spawn", [{call, Name, Args}], Env) ->
+    SpawnArgs = ["TerraSpawnArg" ++ integer_to_list(Index)
+                 || Index <- lists:seq(1, length(Args))],
+    SpawnEnv = maps:from_list(
+        [{"$spawn" ++ integer_to_list(Index), {direct, SpawnArg}}
+         || {SpawnArg, Index} <- lists:zip(SpawnArgs, lists:seq(1, length(Args)))]),
+    CallArgs = [{var_ref, "$spawn" ++ integer_to_list(Index)}
+                || Index <- lists:seq(1, length(Args))],
+    ["terra_spawn(fun(", lists:join(", ", SpawnArgs), ") -> ",
+     function_call(Name, CallArgs, maps:merge(Env, SpawnEnv)), " end, [",
+     lists:join(", ", [expression(Arg, Env) || Arg <- Args]), "]) "];
+function_call("send", [Pid, Message], Env) ->
+    ["terra_send(", expression(Pid, Env), ", ", expression(Message, Env), ")"];
+function_call("receive", [{type_spec, Type}], _Env) ->
+    ["terra_receive(", ffi_type_spec(Type), ")"];
 function_call(Name, Args, Env) when is_list(Name) ->
     [function_name(Name), "(",
      lists:join(", ", [expression(Arg, Env) || Arg <- Args]), ")"];
@@ -752,6 +777,7 @@ default_type(int) -> "0";
 default_type(sint) -> "0";
 default_type(float) -> "0.0";
 default_type(string) -> "<<>>";
+default_type(binary) -> "<<>>";
 default_type(bool) -> "false";
 default_type(atom) -> "undefined";
 default_type(list) -> "[]";
@@ -802,6 +828,8 @@ indent(Level) -> lists:duplicate(Level * 4, $\s).
 runtime_helpers() ->
     "terra_args(Value) when is_binary(Value) -> Value;\n"
     "terra_args(Value) -> unicode:characters_to_binary(Value).\n\n"
+    "terra_main_exit(Value) when is_integer(Value) -> Value;\n"
+    "terra_main_exit(Value) -> erlang:error({invalid_main_exit_value, Value}).\n\n"
     "terra_ffi_return(Expected, Module, Function, Value) ->\n"
     "    case terra_ffi_valid(Expected, Value) of\n"
     "        true -> Value;\n"
@@ -813,7 +841,14 @@ runtime_helpers() ->
     "terra_ffi_valid(float, Value) -> is_float(Value);\n"
     "terra_ffi_valid(atom, Value) -> is_atom(Value);\n"
     "terra_ffi_valid(bool, Value) -> Value =:= true orelse Value =:= false;\n"
-    "terra_ffi_valid(string, Value) -> is_binary(Value);\n"
+    "terra_ffi_valid(string, Value) when is_binary(Value) ->\n"
+    "    case unicode:characters_to_binary(Value) of\n"
+    "        Value -> true;\n"
+    "        _ -> false\n"
+    "    end;\n"
+    "terra_ffi_valid(binary, Value) -> is_binary(Value);\n"
+    "terra_ffi_valid(pid, Value) -> is_pid(Value);\n"
+    "terra_ffi_valid(reference, Value) -> is_reference(Value);\n"
     "terra_ffi_valid(list, Value) -> is_list(Value);\n"
     "terra_ffi_valid(tuple, Value) -> is_tuple(Value);\n"
     "terra_ffi_valid(map, Value) -> is_map(Value);\n"
@@ -865,10 +900,15 @@ runtime_helpers() ->
     "        try binary_to_float(Value)\n"
     "        catch _:_ -> erlang:error({invalid_conversion, string, number, Value}) end\n"
     "    end.\n\n"
-    "terra_to_string(Value) when is_binary(Value) -> Value;\n"
+    "terra_to_string(Value) when is_binary(Value) ->\n"
+    "    case unicode:characters_to_binary(Value) of\n"
+    "        Value -> Value;\n"
+    "        _ -> erlang:error({invalid_conversion, binary, string, Value})\n"
+    "    end;\n"
     "terra_to_string(Value) when is_integer(Value) -> integer_to_binary(Value);\n"
     "terra_to_string(Value) when is_float(Value) -> float_to_binary(Value, [short]);\n"
     "terra_to_string(Value) when is_atom(Value) -> atom_to_binary(Value, utf8).\n\n"
+    "terra_to_binary(Value) when is_binary(Value) -> Value;\n"
     "terra_to_binary(Value) -> terra_to_string(Value).\n\n"
     "terra_global(Key, Fun) ->\n"
     "    StoreKey = {?MODULE, terra_global, Key},\n"
@@ -987,8 +1027,45 @@ runtime_helpers() ->
     "terra_member(Value, Key) when is_map(Value) -> maps:get(Key, Value);\n"
     "terra_member(Value, Key) -> erlang:error({cannot_access_member, Key, Value}).\n".
 
+process_runtime_helpers(Capacity, true) ->
+    ["\nterra_spawn(Fun, Args) ->\n",
+     "    spawn(fun() ->\n",
+     "        TerraRegion = terra_region_start(", region_capacity(Capacity), "),\n",
+     "        try erlang:apply(Fun, Args) after terra_region_cleanup(TerraRegion) end\n",
+     "    end).\n\n",
+     process_message_runtime_helpers()];
+process_runtime_helpers(_Capacity, false) ->
+    ["\nterra_spawn(Fun, Args) -> spawn(fun() -> erlang:apply(Fun, Args) end).\n\n",
+     process_message_runtime_helpers()].
+
+process_message_runtime_helpers() ->
+    "terra_send(Pid, Value) ->\n"
+    "    Pid ! Value,\n"
+    "    ok.\n\n"
+    "terra_receive(Expected) ->\n"
+    "    receive\n"
+    "        Value ->\n"
+    "            case terra_ffi_valid(Expected, Value) of\n"
+    "                true -> Value;\n"
+    "                false -> erlang:error({invalid_terra_message, Expected, Value})\n"
+    "            end\n"
+    "    end.\n".
+
 pointer_runtime_helpers() ->
     "\nterra_region_start(Capacity) ->\n"
+    "    case erlang:get({?MODULE, terra_current_region}) of\n"
+    "        undefined -> terra_region_start_new(Capacity);\n"
+    "        _ -> erlang:error(terra_region_already_active)\n"
+    "    end.\n\n"
+    "terra_region_start_new(Capacity)\n"
+    "  when is_integer(Capacity), Capacity >= 0, Capacity =< 65536 ->\n"
+    "    terra_region_store(Capacity);\n"
+    "terra_region_start_new({auto, Estimate, 65536} = Capacity)\n"
+    "  when is_integer(Estimate), Estimate >= 0, Estimate =< 65536 ->\n"
+    "    terra_region_store(Capacity);\n"
+    "terra_region_start_new(Capacity) ->\n"
+    "    erlang:error({terra_invalid_region_capacity, Capacity}).\n\n"
+    "terra_region_store(Capacity) ->\n"
     "    Ref = make_ref(),\n"
     "    Key = {?MODULE, terra_region, Ref},\n"
     "    erlang:put(Key, #{capacity => Capacity, next => 0, values => #{}}),\n"
@@ -1006,14 +1083,19 @@ pointer_runtime_helpers() ->
     "        undefined -> erlang:error(terra_pointer_outside_region);\n"
     "        Ref ->\n"
     "            Key = {?MODULE, terra_region, Ref},\n"
-    "            Region = erlang:get(Key),\n"
-    "            Slot = maps:get(next, Region),\n"
-    "            terra_region_require_capacity(maps:get(capacity, Region), Slot),\n"
-    "            Values = maps:put(Slot, Value, maps:get(values, Region)),\n"
-    "            erlang:put(Key, Region#{next := Slot + 1, values := Values}),\n"
-    "            {terra_pointer, self(), Ref, Slot}\n"
+    "            case erlang:get(Key) of\n"
+    "                Region when is_map(Region) ->\n"
+    "                    Slot = maps:get(next, Region),\n"
+    "                    terra_region_require_capacity(maps:get(capacity, Region), Slot),\n"
+    "                    Values = maps:put(Slot, Value, maps:get(values, Region)),\n"
+    "                    erlang:put(Key, Region#{next := Slot + 1, values := Values}),\n"
+    "                    {terra_pointer, self(), Ref, Slot};\n"
+    "                _ -> erlang:error(terra_dangling_pointer)\n"
+    "            end\n"
     "    end.\n\n"
-    "terra_region_require_capacity({auto, _Estimate}, _Slot) -> ok;\n"
+    "terra_region_require_capacity({auto, _Estimate, Limit}, Slot) when Slot < Limit -> ok;\n"
+    "terra_region_require_capacity({auto, _Estimate, Limit}, _Slot) ->\n"
+    "    erlang:error({terra_temporary_region_limit, Limit});\n"
     "terra_region_require_capacity(Capacity, Slot) when Slot < Capacity -> ok;\n"
     "terra_region_require_capacity(Capacity, _Slot) ->\n"
     "    erlang:error({terra_temporary_region_full, Capacity}).\n\n"
@@ -1028,12 +1110,14 @@ pointer_runtime_helpers() ->
     "    Values = maps:put(Slot, Value, maps:get(values, Region)),\n"
     "    erlang:put(Key, Region#{values := Values}),\n"
     "    Value.\n\n"
-    "terra_pointer_region({terra_pointer, Owner, Ref, Slot}) when Owner == self() ->\n"
+    "terra_pointer_region({terra_pointer, Owner, Ref, Slot})\n"
+    "  when Owner == self(), is_reference(Ref), is_integer(Slot), Slot >= 0 ->\n"
     "    Key = {?MODULE, terra_region, Ref},\n"
     "    case erlang:get(Key) of\n"
     "        Region when is_map(Region) -> {Key, Slot, Region};\n"
     "        _ -> erlang:error(terra_dangling_pointer)\n"
     "    end;\n"
-    "terra_pointer_region({terra_pointer, _Owner, _Ref, _Slot}) ->\n"
+    "terra_pointer_region({terra_pointer, Owner, Ref, Slot})\n"
+    "  when is_pid(Owner), is_reference(Ref), is_integer(Slot), Slot >= 0 ->\n"
     "    erlang:error(terra_cross_process_pointer);\n"
     "terra_pointer_region(_) -> erlang:error(terra_invalid_pointer).\n".

@@ -1,6 +1,6 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   if 1 {
     stdout("not boolean");
   }
-  return 0;
+  return *SInt(0);
 }

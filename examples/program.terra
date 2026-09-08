@@ -16,7 +16,7 @@ function SInt OpenCalculus(SInt Range) {
     }
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     stdout(try OpenCalculus(1000));
-    return 69420;
+    return *SInt(69420);
 }

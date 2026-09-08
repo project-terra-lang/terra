@@ -20,7 +20,8 @@ main(_Args) ->
                test_records(OutDir),
                test_enums(OutDir),
                test_enum_pattern_ignore(OutDir),
-               test_pointers(OutDir), test_pointer_auto_region(OutDir),
+               test_pointers(OutDir), test_pointer_depth(OutDir),
+               test_pointer_auto_region(OutDir),
                test_pointer_region_overflow(OutDir),
                test_switch_function_case(OutDir),
                test_module_declarations(OutDir), test_module_const_priority(OutDir),
@@ -28,6 +29,9 @@ main(_Args) ->
                test_erlang_ffi(OutDir),
                test_erlang_term_mapping(OutDir),
                test_erlang_return_validation(OutDir),
+               test_beam_value_types(OutDir),
+               test_process_primitives(OutDir),
+               test_invalid_process_message(OutDir),
                test_source_map(OutDir),
                test_showcase_run(OutDir), test_counter_example(OutDir)],
     case lists:member(fail, Results) of
@@ -182,7 +186,7 @@ test_pipe_success(OutDir) ->
             Binary = iolist_to_binary(Source),
             expect("pipe injects values and chains left-to-right",
                    contains(Binary, <<"terra_pipe(fun() -> 2 end">>) andalso
-                   contains(Binary, <<"terra_fn_add(TerraTailArg1, TerraTailArg2)">>));
+                   contains(Binary, <<"terra_fn_add(TerraPipeValue, 3)">>));
         Other ->
             io:format("not ok - pipe injects values and chains left-to-right~n  got: ~p~n",
                       [Other]),
@@ -451,11 +455,32 @@ test_pointers(OutDir) ->
             Binary = iolist_to_binary(Source),
             expect("temporary-region pointers run and clean up",
                    contains(Binary, <<"terra_region_start(4)">>) andalso
+                   contains(Binary, <<"TerraArgsPointer = terra_pointer_new(terra_args(Args))">>) andalso
+                   contains(Binary, <<"terra_main_exit(terra_pointer_read(TerraExitPointer))">>) andalso
                    contains(Binary, <<"terra_pointer_write(">>) andalso
                    contains(Binary, <<"terra_pointer_read(">>) andalso
+                   contains(Binary, <<"terra_region_already_active">>) andalso
+                   contains(Binary, <<"terra_temporary_region_limit">>) andalso
                    erlang:get({terra_pointers, terra_current_region}) == undefined);
         Other ->
             io:format("not ok - temporary-region pointers run and clean up~n  got: ~p~n",
+                      [Other]),
+            fail
+    end.
+
+test_pointer_depth(OutDir) ->
+    Path = "tests/programs/pointer_depth.terra",
+    case {transpiler:transpile_file(Path), transpiler:run_file(Path, "", OutDir)} of
+        {{ok, terra_pointer_depth, Source},
+         {ok, terra_pointer_depth, 7, _BeamPath, _ErlangPath}} ->
+            Binary = iolist_to_binary(Source),
+            expect("nested and strict pointers run on BEAM",
+                   contains(Binary,
+                            <<"terra_pointer_new(terra_pointer_new(terra_pointer_new(1)))">>) andalso
+                   contains(Binary,
+                            <<"terra_pointer_write(terra_pointer_read(terra_pointer_read(">>));
+        Other ->
+            io:format("not ok - nested and strict pointers run on BEAM~n  got: ~p~n",
                       [Other]),
             fail
     end.
@@ -464,7 +489,7 @@ test_pointer_region_overflow(OutDir) ->
     Path = "tests/programs/pointer_region_overflow.terra",
     Result = transpiler:run_file(Path, "", OutDir),
     expect("fixed temporary region enforces capacity",
-           is_runtime_reason(Result, {terra_temporary_region_full, 1})).
+           is_runtime_reason(Result, {terra_temporary_region_full, 3})).
 
 test_pointer_auto_region(OutDir) ->
     Path = "tests/programs/pointer_auto_region.terra",
@@ -473,7 +498,7 @@ test_pointer_auto_region(OutDir) ->
          {ok, terra_pointer_auto_region, 7, _BeamPath, _ErlangPath}} ->
             expect("automatic temporary region uses compiler estimate",
                    contains(iolist_to_binary(Source),
-                            <<"terra_region_start({auto, 1})">>));
+                            <<"terra_region_start({auto, 3, 65536})">>));
         Other ->
             io:format("not ok - automatic temporary region~n  got: ~p~n", [Other]),
             fail
@@ -586,6 +611,54 @@ test_erlang_return_validation(OutDir) ->
         Other ->
             io:format("not ok - Erlang FFI validates declared return types~n"
                       "  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_beam_value_types(OutDir) ->
+    Path = "tests/programs/beam_value_types.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_beam_value_types, 1, _BeamPath, _ErlangPath} ->
+            Pid = self(),
+            Ref = make_ref(),
+            Bytes = <<0, 255, 1>>,
+            Map = #{ready => true},
+            expect("Binary, PID, Reference, and Map BEAM types",
+                   apply(terra_beam_value_types, 'EchoBinary', [Bytes]) == Bytes andalso
+                   apply(terra_beam_value_types, 'EchoPID', [Pid]) == Pid andalso
+                   apply(terra_beam_value_types, 'EchoReference', [Ref]) == Ref andalso
+                   apply(terra_beam_value_types, 'EchoMap', [Map]) == Map);
+        Other ->
+            io:format("not ok - Binary, PID, Reference, and Map BEAM types~n"
+                      "  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_process_primitives(OutDir) ->
+    Path = "examples/processes.terra",
+    case transpiler:run_file(Path, "", OutDir) of
+        {ok, terra_processes, 1, _BeamPath, _ErlangPath} ->
+            expect("process spawn and message exchange", true);
+        Other ->
+            io:format("not ok - process spawn and message exchange~n  got: ~p~n", [Other]),
+            fail
+    end.
+
+test_invalid_process_message(OutDir) ->
+    Path = "tests/programs/process_invalid_message.terra",
+    case transpiler:compile_file(Path, OutDir) of
+        {ok, terra_process_invalid_message, _BeamPath, _ErlangPath} ->
+            code:add_pathz(OutDir),
+            code:purge(terra_process_invalid_message),
+            code:delete(terra_process_invalid_message),
+            {module, terra_process_invalid_message} =
+                code:load_abs(filename:join(OutDir, "terra_process_invalid_message")),
+            self() ! 42,
+            Error = erlang_export_error(
+                fun() -> apply(terra_process_invalid_message, 'ReadString', []) end),
+            expect("received messages are type checked",
+                   Error == {invalid_terra_message, string, 42});
+        Other ->
+            io:format("not ok - received messages are type checked~n  got: ~p~n", [Other]),
             fail
     end.
 

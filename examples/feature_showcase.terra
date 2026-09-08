@@ -1,7 +1,7 @@
 -- Terra feature showcase
 -- Run with: ./run.sh run examples/feature_showcase.terra hello from terra
 
-temp region(1);
+temp region(3);
 
 struct ShowcasePlayer {
   String name;
@@ -50,10 +50,10 @@ function Int Increment(Int value) {
   return value + 1;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
   -- Fixed entry point and command-line arguments.
   stdout("Main received:");
-  stdout(Args);
+  stdout(Args.*);
 
   -- Once-only calls run once even when written twice.
   Banner;
@@ -205,6 +205,6 @@ function Number Main(String Args) {
   -- Character literals use Erlang-compatible integer characters.
   stdout('T');
 
-  return doubled;
+  return *SInt(SInt(doubled));
   -- stdout(""); // this is a bad reporting if the statement shown here is wrong when printing error
 }

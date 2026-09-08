@@ -11,17 +11,17 @@ struct Wrapper {
     }
 }
 
-function Number Main(String Args) {
-    local Inner inner = Inner(Status.Down(Args));
+function strict *SInt Main(*String Args) {
+    local Inner inner = Inner(Status.Down(Args.*));
     local Wrapper wrapper = Wrapper(inner);
 
     if wrapper.inner.status == {
         case Status.Ready():
-            return 1;
+            return *SInt(1);
         case Status.Down(bind reason):
             stdout(reason);
-            return 2;
+            return *SInt(2);
         case:
-            return 0;
+            return *SInt(0);
     }
 }

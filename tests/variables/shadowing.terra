@@ -1,6 +1,6 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local Var data = "42";
 local Int data = 42;
 local Int copy = data;
-return 0;
+return *SInt(0);
 }

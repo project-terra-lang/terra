@@ -1,7 +1,7 @@
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
 local const Int precedence = 1 + 2 * 3;
 local const Int grouped = (1 + 2) * 3;
 local const Int ordered = 10 - 3 - 2;
 local computed Int runtime_order = precedence + grouped * ordered;
-return 0;
+return *SInt(0);
 }

@@ -2,10 +2,10 @@ function Bool Logic(Bool a, Bool b, Int n) {
     return !a || b && n + 2 * 3 == 7;
 }
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     if Logic(false, true, 1) {
-        return 1;
+        return *SInt(1);
     } else {
-        return 0;
+        return *SInt(0);
     }
 }

@@ -4,7 +4,8 @@
 %% Data types from README.md.
 
 all() ->
-    [number, int, sint, float, atom, bool, map, restricted_map, list, tuple, string].
+    [number, int, sint, float, atom, bool, map, restricted_map, list, tuple,
+     string, binary, pid, reference].
 
 number_types() ->
     [int, sint, float].

@@ -18,7 +18,7 @@ extern Atom erlang.erlang.map_get(Atom key, Result value);
 extern Atom erlang.erlang.element(Int index, RestrictedMap value);
 extern (String, String) erlang.erlang.split_binary(String value, Int position);
 
-function Number Main(String Args) {
+function strict *SInt Main(*String Args) {
     local Player player = Player("Ada");
     local Result result = Result.Ready();
     local RestrictedMap limited = RestrictedMap(2, #(:ready => true));
@@ -35,8 +35,8 @@ function Number Main(String Args) {
        erlang.erlang.map_get(:tag, result) == :Ready &&
        erlang.erlang.element(1, limited) == :terra_restricted_map &&
        left == "Te" && right == "rra" {
-        return 1;
+        return *SInt(1);
     } else {
-        return 0;
+        return *SInt(0);
     }
 }

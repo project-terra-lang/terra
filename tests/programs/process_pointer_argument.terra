@@ -1,0 +1,9 @@
+function Atom Worker(*Int value) {
+    return :done;
+}
+
+function strict *SInt Main(*String Args) {
+    local *Int value = 1;
+    local PID worker = spawn(Worker(value));
+    return *SInt(0);
+}
