@@ -9,7 +9,9 @@
 > and [LICENSE](LICENSE).
 
 > [!IMPORTANT]
-> if you want to use this software and improve it i reccommend you clone it yourself and do the changes in your local repo
+> if you want to use this software and improve it i reccommend you clone it yourself and do the changes in your local repo <br/>
+> Also available on Gitlab if you use that too
+> [Gitlab](https://gitlab.com/openworkspace-group/terra), [Unimplemented STDLIB](https://gitlab.com/openworkspace-group/terra-stdlib)
 
 Terra is a small research language with a Lua-like imperative syntax that
 transpiles to Erlang and runs on the BEAM. It is aimed at programs such as game
