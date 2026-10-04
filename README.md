@@ -1,10 +1,15 @@
 # Terra
 
+[![Architecture diagram of project-terra-lang/terra](https://gitdiagram.com/project-terra-lang/terra/diagram.png)](https://gitdiagram.com/project-terra-lang/terra?utm_source=readme&utm_medium=picture)
+
 > **Archive status:** Terra is complete as a personal research project and is
 > intended to be archived publicly. The project was entirely vibecoded. Anyone
 > interested may fork it, reshape it, use it, commercialize it, or sell derived
 > work without asking permission or giving credit. See [ARCHIVE.md](ARCHIVE.md)
 > and [LICENSE](LICENSE).
+
+> [!IMPORTANT]
+> if you want to use this software and improve it i reccommend you clone it yourself and do the changes in your local repo
 
 Terra is a small research language with a Lua-like imperative syntax that
 transpiles to Erlang and runs on the BEAM. It is aimed at programs such as game
